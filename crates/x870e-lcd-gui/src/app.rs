@@ -34,7 +34,7 @@ pub struct LcdGuiApp {
     display_on: bool,
     current_mode: String,
 
-    // Temperature Warning Setting (1:1 with ASUS MB Manager)
+    // Temperature Warning Setting
     temp_warning_enabled: bool,
     temp_warning_threshold: u32, // 75, 80, 85, 90, 95, 100
 
@@ -425,8 +425,8 @@ impl eframe::App for LcdGuiApp {
                     ui.separator();
                     ui.add_space(6.0);
 
-                    // 1:1 ASUS MB Manager Feature: Standby Wallpaper
-                    ui.heading("Sleep & Standby Behavior (1:1 ASUS Parity)");
+                    // Standby Wallpaper
+                    ui.heading("Sleep & Standby Behavior");
                     ui.add_space(4.0);
                     let mut standby = self.standby_wallpaper;
                     if ui.checkbox(&mut standby, "When system is in sleep, hibernate or soft off states (Keep Wallpaper Displayed)").changed() {
@@ -438,8 +438,8 @@ impl eframe::App for LcdGuiApp {
                     ui.separator();
                     ui.add_space(6.0);
 
-                    // 1:1 ASUS MB Manager Feature: Temperature Warning
-                    ui.heading("Temperature Warning Alert (1:1 ASUS Parity)");
+                    // Temperature Warning Alert
+                    ui.heading("Temperature Warning Alert");
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
                         ui.checkbox(&mut self.temp_warning_enabled, "Enable Temperature Warning");

@@ -14,7 +14,7 @@ A native, high-performance Linux driver, CLI daemon, and desktop GUI written in 
   - `Multi`: 5 sensor gauges (requires Theme Style 3).
   - **Visual Themes**: Switch between theme styles (**Styles 1, 2, 3, and 4**).
   - **Custom Sensor Assignments**: Choose what appears in each slot (CPU Package Temp, CPU Core Frequency, CPU Utilization %, GPU Temp, GPU Utilization %, RAM Usage, RAM Usage %, CPU Model Name).
-- **1:1 Windows ASUS MB Manager Feature Parity**:
+- **Power & Safety Controls**:
   - **Standby Wallpaper ("When system is in sleep, hibernate or soft off states")**: Hardware-level setting (`0x5c` byte 16) that keeps the default wallpaper illuminated on 5V standby power when the PC enters sleep, hibernate, or soft-off.
   - **Temperature Warning Alerts**: Configurable temperature warning thresholds (75°C, 80°C, 85°C, 90°C, 95°C, 100°C) triggering visual alerts when components overheat.
 - **Multi-Slot Image Storage & Display**:
@@ -25,7 +25,7 @@ A native, high-performance Linux driver, CLI daemon, and desktop GUI written in 
   - **Erase Slot**: Clear custom images from specific flash slots and restore factory defaults.
 - **Built-in ROG Animations**: Switch between built-in ROG animation presets (`Preset 0` and `Preset 1`).
 - **Backlight Brightness**: Smooth brightness adjustment from 0% to 100% with quick preset buttons.
-- **Desktop GUI (`x870e-lcd-gui`)**: Sleek ROG-themed desktop interface built with `egui` featuring real-time 720x1280 screen previews, live sensor slot mapping, asynchronous non-blocking image flashing worker, and 1:1 settings modal.
+- **Desktop GUI (`x870e-lcd-gui`)**: Sleek ROG-themed desktop interface built with `egui` featuring real-time 720x1280 screen previews, live sensor slot mapping, asynchronous non-blocking image flashing worker, and dedicated power/safety controls.
 - **Headless CLI (`x870e-lcd`)**: Lightweight binary for scripting, keybinds, and running background systemd telemetry services.
 
 ---
@@ -169,7 +169,7 @@ The CLI binary is located at `target/release/x870e-lcd`.
 ./target/release/x870e-lcd mode default-wallpaper --index 5   # Default Wallpaper Preset 5
 ```
 
-### 4. Sleep & Standby Wallpaper Configuration (1:1 ASUS Parity)
+### 4. Sleep & Standby Wallpaper Configuration
 ```bash
 # Enable: Keep default wallpaper lit on 5V standby power during PC sleep/hibernate/soft-off
 ./target/release/x870e-lcd standby-wallpaper true
