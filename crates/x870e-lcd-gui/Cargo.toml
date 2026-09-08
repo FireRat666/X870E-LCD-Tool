@@ -1,0 +1,15 @@
+[package]
+name = "x870e-lcd-gui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+x870e-lcd-core = { path = "../x870e-lcd-core" }
+eframe = { workspace = true }
+rfd = { workspace = true }
+image = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
