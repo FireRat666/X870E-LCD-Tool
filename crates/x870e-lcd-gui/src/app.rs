@@ -10,7 +10,7 @@ use image::DynamicImage;
 use x870e_lcd_core::{
     calculate_crop_rect, crop_and_scale, encode_to_jpeg, load_and_prepare_jpeg, process_image,
     DisplayMode, FitMode, HardwareMonitor, HwLayout, LcdDevice, SensorMetric, SlotCatalog,
-    TelemetrySnapshot,
+    SlotEntry, TelemetrySnapshot,
 };
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -365,7 +365,8 @@ impl LcdGuiApp {
                                     if let Ok(dyn_img) = image::open(&path) {
                                         let filename = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| format!("Slot {target_slot}"));
                                         let mut cat = SlotCatalog::load();
-                                        let _ = cat.add_slot(target_slot, &filename, &dyn_img, jpeg.len());
+                                        let entry = SlotEntry::new(target_slot, &filename, jpeg.len());
+                                        let _ = cat.add_slot(entry, &dyn_img);
                                     }
                                     let _ = tx.send(UploadEvent::ImageFlashed {
                                         slot: target_slot,
@@ -483,7 +484,8 @@ impl LcdGuiApp {
                                 Ok(_) => {
                                     let dyn_img = DynamicImage::ImageRgb8(rgb);
                                     let mut cat = SlotCatalog::load();
-                                    let _ = cat.add_slot(target_slot, &title, &dyn_img, jpeg.len());
+                                    let entry = SlotEntry::new(target_slot, &title, jpeg.len());
+                                    let _ = cat.add_slot(entry, &dyn_img);
 
                                     let _ = tx.send(UploadEvent::ImageFlashed {
                                         slot: target_slot,
@@ -775,7 +777,7 @@ impl LcdGuiApp {
                         ui.add_space(6.0);
                         ui.horizontal(|ui| {
                             ui.label(RichText::new("Flash to Slot:").strong());
-                            ui.add(egui::DragValue::new(&mut state.target_slot).range(0..=63).prefix("Slot "));
+                            ui.add(egui::DragValue::new(&mut state.target_slot).range(0..=255).prefix("Slot "));
                             let is_occ = self.catalog.is_occupied(state.target_slot);
                             if is_occ {
                                 ui.label(RichText::new("(Will overwrite existing image in this slot)").color(Color32::from_rgb(255, 180, 80)).size(11.0));
@@ -864,7 +866,7 @@ impl eframe::App for LcdGuiApp {
         ctx.input(|i| {
             if !i.raw.dropped_files.is_empty() {
                 for file in &i.raw.dropped_files {
-                    let target_slot = self.catalog.next_free_slot(64).unwrap_or(self.selected_custom_slot);
+                    let target_slot = self.catalog.next_free_slot(256).unwrap_or(self.selected_custom_slot);
                     if let Some(path) = &file.path {
                         self.open_crop_modal(path.clone(), target_slot, ctx);
                         self.active_tab = ActiveTab::ImageUpload;
@@ -1297,12 +1299,12 @@ impl eframe::App for LcdGuiApp {
                                 .selected_text(format!("Slot {}", self.selected_custom_slot))
                                 .width(130.0)
                                 .show_ui(ui, |ui| {
-                                    for s in 0u8..=63 {
+                                    for s in 0u8..=255 {
                                         let tag = if self.catalog.is_occupied(s) { " [Stored]" } else { "" };
                                         ui.selectable_value(&mut self.selected_custom_slot, s, format!("Slot {s}{tag}"));
                                     }
                                 });
-                            ui.add(egui::DragValue::new(&mut self.selected_custom_slot).range(0..=63u8).prefix("Slot "));
+                            ui.add(egui::DragValue::new(&mut self.selected_custom_slot).range(0..=255u8).prefix("Slot "));
                             if ui.add(egui::Button::new(RichText::new("Apply").size(12.0)).min_size(Vec2::new(60.0, 24.0))).clicked() {
                                 let slot = self.selected_custom_slot;
                                 self.set_mode(DisplayMode::CustomSlot(slot), &format!("Custom Slot {slot}"));
@@ -1436,7 +1438,7 @@ impl eframe::App for LcdGuiApp {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.checkbox(&mut self.advanced_mode, "⚙ Advanced Slot Mode");
                             let occupied = self.catalog.occupied_count();
-                            let cap_text = format!("Storage: {} / 64 Custom Slots Used", occupied);
+                            let cap_text = format!("Storage: {} / 255 Custom Slots Used", occupied);
                             ui.label(RichText::new(cap_text).monospace().color(Color32::from_rgb(180, 180, 200)));
                         });
                     });
@@ -1507,11 +1509,11 @@ impl eframe::App for LcdGuiApp {
                     // 2. Custom Flashed Images (SPI Flash Storage)
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("Custom Images (Motherboard SPI Storage)").strong());
-                        let free_slot = self.catalog.next_free_slot(64);
+                        let free_slot = self.catalog.next_free_slot(256);
                         if let Some(next) = free_slot {
                             ui.label(RichText::new(format!("(Next Free: Slot {next})")).size(11.0).color(Color32::from_rgb(100, 200, 120)));
                         } else {
-                            ui.label(RichText::new("(All 64 Slots Full)").size(11.0).color(Color32::from_rgb(255, 80, 80)));
+                            ui.label(RichText::new("(All 255 Slots Full)").size(11.0).color(Color32::from_rgb(255, 80, 80)));
                         }
                     });
                     ui.add_space(4.0);
@@ -1624,7 +1626,7 @@ impl eframe::App for LcdGuiApp {
                             }
 
                             // 2b. The "+ Add Image" Card (Puts image in next free slot)
-                            let free_slot_opt = self.catalog.next_free_slot(64);
+                            let free_slot_opt = self.catalog.next_free_slot(256);
                             let add_card_w = 90.0;
                             let add_card_h = 160.0;
                             let (add_rect, add_resp) = ui.allocate_exact_size(Vec2::new(add_card_w, add_card_h), egui::Sense::click());
@@ -1659,7 +1661,7 @@ impl eframe::App for LcdGuiApp {
                             );
                             let subtext = match free_slot_opt {
                                 Some(s) => format!("Next: Slot {s}"),
-                                None => "Full (64/64)".to_string(),
+                                None => "Full (255/255)".to_string(),
                             };
                             ui.painter().text(
                                 egui::pos2(add_center.x, add_center.y + 26.0),
@@ -1686,7 +1688,7 @@ impl eframe::App for LcdGuiApp {
                             .add_filter("Images", &["png", "jpg", "jpeg", "webp", "bmp", "gif"])
                             .pick_file()
                         {
-                            let slot = self.catalog.next_free_slot(64).unwrap_or(self.selected_custom_slot);
+                            let slot = self.catalog.next_free_slot(256).unwrap_or(self.selected_custom_slot);
                             self.selected_custom_slot = slot;
                             self.open_crop_modal(path, slot, ctx);
                         }
@@ -1698,16 +1700,16 @@ impl eframe::App for LcdGuiApp {
                         ui.separator();
                         ui.add_space(8.0);
                         ui.heading("⚙ Advanced Slot Management & Manual Controls");
-                        ui.label("Directly target specific slots (0..=63), force overwrite, adjust JPEG quality and scaling modes.");
+                        ui.label("Directly target specific slots (0..=255), force overwrite, adjust JPEG quality and scaling modes.");
                         ui.add_space(6.0);
 
                         ui.horizontal(|ui| {
                             ui.label("Target Destination Slot:");
-                            ui.add(egui::DragValue::new(&mut self.selected_custom_slot).range(0..=63).prefix("Slot "));
+                            ui.add(egui::DragValue::new(&mut self.selected_custom_slot).range(0..=255).prefix("Slot "));
                             ComboBox::from_id_salt("adv_upload_slot_select")
                                 .selected_text(format!("Custom Slot {} (SPI Flash)", self.selected_custom_slot))
                                 .show_ui(ui, |ui| {
-                                    for s in 0..=63 {
+                                    for s in 0..=255 {
                                         let tag = if self.catalog.is_occupied(s) { " [Occupied]" } else { " [Free]" };
                                         ui.selectable_value(&mut self.selected_custom_slot, s, format!("Custom Slot {s}{tag}"));
                                     }

@@ -15,7 +15,7 @@ use tracing::{debug, error, info};
 /// Metadata entry for a custom image flashed to an SPI flash slot.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SlotEntry {
-    /// Zero-based slot index on the SPI flash memory (0..=63)
+    /// Zero-based slot index on the SPI flash memory (0..=255)
     pub slot: u8,
     /// Display name or label for the image
     pub title: String,
@@ -60,27 +60,68 @@ pub fn catalog_file_path() -> PathBuf {
     config_dir().join("catalog.json")
 }
 
+impl SlotEntry {
+    /// Constructs a new `SlotEntry` from slot index, source filename, and file size in bytes.
+    pub fn new(slot: u8, orig_filename: &str, file_size_bytes: usize) -> Self {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        let title = std::path::Path::new(orig_filename)
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| format!("Custom {slot}"));
+
+        Self {
+            slot,
+            title,
+            original_filename: orig_filename.to_string(),
+            timestamp: now,
+            file_size_bytes,
+            thumbnail_filename: format!("slot_{slot}.png"),
+        }
+    }
+}
+
 impl SlotCatalog {
     /// Loads the slot catalog from disk, or returns an empty catalog if none exists.
     pub fn load() -> Self {
+        let mut catalog = Self::default();
+        catalog.reload();
+        catalog
+    }
+
+    /// Reloads the catalog from disk into self.
+    pub fn reload(&mut self) {
         let path = catalog_file_path();
-        if path.is_file() {
-            match fs::read_to_string(&path) {
-                Ok(json) => match serde_json::from_str::<SlotCatalog>(&json) {
-                    Ok(catalog) => {
-                        debug!("Loaded slot catalog with {} slots from {:?}", catalog.slots.len(), path);
-                        return catalog;
-                    }
-                    Err(e) => {
-                        error!("Failed to parse catalog JSON from {:?}: {}", path, e);
-                    }
-                },
-                Err(e) => {
-                    error!("Failed to read catalog file {:?}: {}", path, e);
+        if !path.is_file() {
+            return;
+        }
+
+        let json = match fs::read_to_string(&path) {
+            Ok(content) => content,
+            Err(e) => {
+                error!("Failed to read catalog file {:?}: {}", path, e);
+                return;
+            }
+        };
+
+        match serde_json::from_str::<SlotCatalog>(&json) {
+            Ok(loaded) => {
+                debug!("Loaded slot catalog with {} slots from {:?}", loaded.slots.len(), path);
+                self.slots = loaded.slots;
+            }
+            Err(e) => {
+                error!("Failed to parse catalog JSON from {:?}: {}", path, e);
+                let backup_path = path.with_extension("json.bak");
+                if let Err(err) = fs::rename(&path, &backup_path) {
+                    error!("Failed to backup corrupt catalog file to {:?}: {}", backup_path, err);
+                } else {
+                    info!("Preserved corrupt catalog file as {:?}", backup_path);
                 }
             }
         }
-        Self::default()
     }
 
     /// Atomically saves the slot catalog to disk.
@@ -99,11 +140,13 @@ impl SlotCatalog {
         Ok(())
     }
 
-    /// Finds the lowest available free slot index within `0..max_slots` (e.g. 64).
-    pub fn next_free_slot(&self, max_slots: u8) -> Option<u8> {
-        for s in 0..max_slots {
-            if !self.slots.contains_key(&s) {
-                return Some(s);
+    /// Finds the lowest available free slot index within `0..max_slots` (e.g. 256 for slots 0..=255).
+    pub fn next_free_slot(&self, max_slots: u16) -> Option<u8> {
+        let limit = max_slots.min(256);
+        for s in 0..limit {
+            let slot_u8 = s as u8;
+            if !self.slots.contains_key(&slot_u8) {
+                return Some(slot_u8);
             }
         }
         None
@@ -121,22 +164,23 @@ impl SlotCatalog {
 
     /// Returns the absolute path to a slot's thumbnail image.
     pub fn thumbnail_path(&self, slot: u8) -> PathBuf {
-        thumbnails_dir().join(format!("slot_{slot}.png"))
+        if let Some(entry) = self.slots.get(&slot) {
+            thumbnails_dir().join(&entry.thumbnail_filename)
+        } else {
+            thumbnails_dir().join(format!("slot_{slot}.png"))
+        }
     }
 
     /// Adds or updates a custom slot entry, generating a thumbnail and saving the catalog.
     pub fn add_slot(
         &mut self,
-        slot: u8,
-        orig_filename: &str,
+        entry: SlotEntry,
         preview_img: &DynamicImage,
-        file_size_bytes: usize,
     ) -> std::io::Result<()> {
         let thumbs_dir = thumbnails_dir();
         fs::create_dir_all(&thumbs_dir)?;
 
-        let thumb_filename = format!("slot_{slot}.png");
-        let thumb_path = thumbs_dir.join(&thumb_filename);
+        let thumb_path = thumbs_dir.join(&entry.thumbnail_filename);
 
         // Resize image to small thumbnail maintaining 720:1280 ratio (e.g. 72x128)
         let thumbnail = preview_img.resize_exact(72, 128, image::imageops::FilterType::Triangle);
@@ -144,35 +188,16 @@ impl SlotCatalog {
             .save(&thumb_path)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
 
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-
-        let title = std::path::Path::new(orig_filename)
-            .file_stem()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_else(|| format!("Custom {slot}"));
-
-        let entry = SlotEntry {
-            slot,
-            title,
-            original_filename: orig_filename.to_string(),
-            timestamp: now,
-            file_size_bytes,
-            thumbnail_filename: thumb_filename,
-        };
-
-        info!("Registering Slot {} in catalog: {}", slot, entry.title);
-        self.slots.insert(slot, entry);
+        info!("Registering Slot {} in catalog: {}", entry.slot, entry.title);
+        self.slots.insert(entry.slot, entry);
         self.save()
     }
 
     /// Removes a slot from the catalog and deletes its cached thumbnail.
     pub fn remove_slot(&mut self, slot: u8) -> std::io::Result<Option<SlotEntry>> {
+        let thumb_path = self.thumbnail_path(slot);
         let removed = self.slots.remove(&slot);
-        if let Some(ref entry) = removed {
-            let thumb_path = thumbnails_dir().join(&entry.thumbnail_filename);
+        if removed.is_some() {
             if thumb_path.exists() {
                 let _ = fs::remove_file(thumb_path);
             }
@@ -246,5 +271,20 @@ mod tests {
         assert_eq!(entry.title, "ROG Neon");
         assert_eq!(entry.original_filename, "neon.jpg");
         assert_eq!(entry.file_size_bytes, 145000);
+    }
+
+    #[test]
+    fn test_slot_entry_new_and_thumbnail_path() {
+        let entry = SlotEntry::new(5, "my_wallpaper.png", 42000);
+        assert_eq!(entry.slot, 5);
+        assert_eq!(entry.title, "my_wallpaper");
+        assert_eq!(entry.thumbnail_filename, "slot_5.png");
+        assert_eq!(entry.file_size_bytes, 42000);
+
+        let mut catalog = SlotCatalog::default();
+        catalog.slots.insert(entry.slot, entry);
+
+        let thumb = catalog.thumbnail_path(5);
+        assert!(thumb.ends_with("slot_5.png"));
     }
 }
