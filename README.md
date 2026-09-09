@@ -2,6 +2,9 @@
 
 A native, high-performance Linux driver, CLI daemon, and desktop GUI written in **Rust** to control, customize, flash images, and stream real-time hardware telemetry to the 5-inch onboard color LCD panel (`0b05:1c83`) on the ASUS ROG Crosshair X870E Extreme motherboard.
 
+> [!WARNING]
+> **Experimental Software & Disclaimer**: This tool is an independently developed project and is not affiliated with or endorsed by ASUSTeK Computer Inc. Interacting directly with the onboard display microcontroller and flashing data to its SPI memory carries inherent risk. **You use this software entirely at your own risk.** If your panel stops responding, see [Emergency Recovery (Restoring the LCD)](#emergency-recovery-restoring-the-lcd) below.
+
 ---
 
 ## Features
@@ -261,6 +264,36 @@ journalctl --user -u x870e-lcd.service -f
   - Report ID `0xEE`: Device ACK and flash commit status notifications on Endpoint `0x81` IN.
 - **Hardware Notes**:
   - The motherboard firmware only possesses Multi Info gauge graphical assets for **Theme Style 3**. Styles 1, 2, 4, 5, 6 are designed for Single, Dual, and Triple gauge layouts.
+
+---
+
+## ⚠️ Disclaimer & Emergency Recovery
+
+### Disclaimer
+This software is experimental. Communicating directly with the motherboard's onboard display microcontroller (`0b05:1c83`) and writing custom blocks to its SPI flash memory involves low-level hardware operations. If invalid image formats or unexpected data streams are transmitted, the microcontroller's hardware JPEG decoder may fault, causing the screen to remain completely black (with no backlight) and stop responding to software commands.
+
+The authors and contributors provide this software "AS IS", without warranty of any kind, express or implied. Under no circumstances shall the authors be held liable for any damages, hardware malfunctions, or issues arising from the use of this software.
+
+### Emergency Recovery (Restoring the LCD)
+If your 5-inch LCD panel ever enters an unresponsive or black screen state and does not recover across normal reboots, it can potentially be restored to full working factory condition using the official ASUS firmware updater tool:
+
+1. **Download Official ASUS LCD Firmware**:
+   * Visit the official ASUS ROG Crosshair X870E Extreme support portal:  
+     [ASUS ROG Support - BIOS & Firmware](https://rog.asus.com/motherboards/rog-crosshair/rog-crosshair-x870e-extreme/helpdesk_bios/)
+   * From the **BIOS & Firmware** tab, scroll to and expand the **Firmware** subsection.
+   * Download: **ROG CROSSHAIR X870E EXTREME LCD Firmware v0109** (or latest release).
+2. **Firmware Release Information**:
+   * **Version**: `0109`
+   * **Release Date**: `2025/09/03`
+   * **File Size**: `1.06 MB`
+   * **SHA-256 Checksum**:
+     ```
+     7D0F17FF087B1268EBD27A01E09D1C838FB6B2950AB6E86290079ED924A92C3A
+     ```
+3. **Flashing Procedure**:
+   * Boot into a Windows environment (or Windows PE / To-Go USB drive).
+   * Extract and run the ASUS update tool executable (`ASUS_MB20245InchLCD_FW0109_UpdateTool`).
+   * The tool will detect the panel and cleanly rewrite the factory firmware and stock wallpaper assets into the onboard SPI flash.
 
 ---
 

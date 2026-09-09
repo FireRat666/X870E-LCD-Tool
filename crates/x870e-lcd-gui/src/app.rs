@@ -619,7 +619,8 @@ impl eframe::App for LcdGuiApp {
                 ActiveTab::ImageUpload => {
                     ui.heading("Flash Custom Image (Motherboard SPI Storage)");
                     ui.label("Upload any image (PNG, JPG, WebP, BMP, GIF). Encoded in hardware-compliant JFIF YUV 4:2:0 JPEG with standard IDs (1, 2, 3).");
-                    ui.add_space(10.0);
+                    ui.label(RichText::new("⚠️ Experimental feature. Use at your own risk. See README for ASUS v0109 firmware restore info.").size(11.0).color(Color32::from_rgb(230, 170, 60)));
+                    ui.add_space(8.0);
 
                     ui.horizontal(|ui| {
                         ui.label("Target Destination Slot:");
