@@ -4,8 +4,13 @@ pub mod protocol;
 pub mod device;
 pub mod hwmon;
 pub mod image;
+pub mod catalog;
 
 pub use device::{LcdDevice, LcdError};
 pub use protocol::{DisplayMode, HwLayout};
 pub use hwmon::{HardwareMonitor, TelemetrySnapshot, SensorMetric};
-pub use image::{process_image, load_and_prepare_jpeg, FitMode};
+pub use image::{
+    calculate_crop_rect, crop_and_scale, encode_to_jpeg, load_and_prepare_jpeg, process_image,
+    FitMode,
+};
+pub use catalog::{config_dir, thumbnails_dir, SlotCatalog, SlotEntry};
