@@ -124,6 +124,68 @@ pub fn patch_jfif_component_ids(jpeg: &mut [u8]) {
     }
 }
 
+/// Computes the normalized crop rectangle [min_x, min_y, max_x, max_y] (all in 0.0..=1.0)
+/// representing a 720:1280 aspect ratio region inside an image of dimensions `(img_w, img_h)`.
+pub fn calculate_crop_rect(
+    img_w: u32,
+    img_h: u32,
+    norm_center: (f32, f32),
+    crop_scale: f32,
+) -> (f32, f32, f32, f32) {
+    if img_w == 0 || img_h == 0 {
+        return (0.0, 0.0, 1.0, 1.0);
+    }
+    let target_ar = PANEL_WIDTH as f32 / PANEL_HEIGHT as f32; // 720.0 / 1280.0 = 0.5625
+    let img_ar = img_w as f32 / img_h as f32;
+
+    let (base_norm_w, base_norm_h) = if img_ar >= target_ar {
+        // Image is wider than 9:16 (e.g. landscape or square)
+        (target_ar / img_ar, 1.0)
+    } else {
+        // Image is narrower than 9:16
+        (1.0, img_ar / target_ar)
+    };
+
+    let scale = crop_scale.clamp(0.05, 1.0);
+    let norm_w = (base_norm_w * scale).clamp(0.01, 1.0);
+    let norm_h = (base_norm_h * scale).clamp(0.01, 1.0);
+
+    let half_w = norm_w / 2.0;
+    let half_h = norm_h / 2.0;
+
+    let cx = norm_center.0.clamp(half_w, 1.0 - half_w);
+    let cy = norm_center.1.clamp(half_h, 1.0 - half_h);
+
+    let min_x = (cx - half_w).clamp(0.0, 1.0);
+    let min_y = (cy - half_h).clamp(0.0, 1.0);
+    let max_x = (cx + half_w).clamp(0.0, 1.0);
+    let max_y = (cy + half_h).clamp(0.0, 1.0);
+
+    (min_x, min_y, max_x, max_y)
+}
+
+/// Crops a dynamic image using the normalized center and scale, then resizes to the exact 720x1280 hardware dimensions.
+pub fn crop_and_scale(
+    img: &DynamicImage,
+    norm_center: (f32, f32),
+    crop_scale: f32,
+) -> RgbImage {
+    let (w, h) = img.dimensions();
+    if w == 0 || h == 0 {
+        return RgbImage::new(PANEL_WIDTH, PANEL_HEIGHT);
+    }
+
+    let (min_x, min_y, max_x, max_y) = calculate_crop_rect(w, h, norm_center, crop_scale);
+
+    let px_x = (min_x * w as f32).round().clamp(0.0, (w - 1) as f32) as u32;
+    let px_y = (min_y * h as f32).round().clamp(0.0, (h - 1) as f32) as u32;
+    let px_w = ((max_x - min_x) * w as f32).round().clamp(1.0, (w - px_x) as f32) as u32;
+    let px_h = ((max_y - min_y) * h as f32).round().clamp(1.0, (h - px_y) as f32) as u32;
+
+    let cropped = img.crop_imm(px_x, px_y, px_w, px_h);
+    image::imageops::resize(&cropped.to_rgb8(), PANEL_WIDTH, PANEL_HEIGHT, FilterType::Lanczos3)
+}
+
 /// Convenience function: Loads any image file from disk and encodes it as a 720x1280 JPEG.
 pub fn load_and_prepare_jpeg<P: AsRef<Path>>(path: P, mode: FitMode, quality: u8) -> Result<Vec<u8>, ImageError> {
     let img = image::open(path)?;
@@ -151,5 +213,28 @@ mod tests {
         assert_eq!(jpeg[sos_idx + 5], 1, "Scan component 0 selector should be 1");
         assert_eq!(jpeg[sos_idx + 7], 2, "Scan component 1 selector should be 2");
         assert_eq!(jpeg[sos_idx + 9], 3, "Scan component 2 selector should be 3");
+    }
+
+    #[test]
+    fn test_crop_and_scale_dimensions() {
+        let img = DynamicImage::ImageRgb8(RgbImage::new(1920, 1080));
+        let result = crop_and_scale(&img, (0.5, 0.5), 1.0);
+        assert_eq!(result.width(), PANEL_WIDTH);
+        assert_eq!(result.height(), PANEL_HEIGHT);
+
+        let zoomed = crop_and_scale(&img, (0.2, 0.8), 0.5);
+        assert_eq!(zoomed.width(), PANEL_WIDTH);
+        assert_eq!(zoomed.height(), PANEL_HEIGHT);
+    }
+
+    #[test]
+    fn test_calculate_crop_rect_clamping() {
+        let (min_x, min_y, max_x, max_y) = calculate_crop_rect(1920, 1080, (-5.0, 5.0), 1.0);
+        assert!(min_x >= 0.0 && min_x <= 1.0);
+        assert!(min_y >= 0.0 && min_y <= 1.0);
+        assert!(max_x >= 0.0 && max_x <= 1.0);
+        assert!(max_y >= 0.0 && max_y <= 1.0);
+        assert!(max_x > min_x);
+        assert!(max_y > min_y);
     }
 }

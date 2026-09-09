@@ -13,8 +13,8 @@ fn main() -> Result<()> {
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title("X870E Extreme LCD Tool")
-            .with_inner_size(Vec2::new(760.0, 500.0))
-            .with_min_inner_size(Vec2::new(650.0, 420.0))
+            .with_inner_size(Vec2::new(980.0, 680.0))
+            .with_min_inner_size(Vec2::new(740.0, 520.0))
             .with_drag_and_drop(true),
         ..Default::default()
     };

@@ -6,9 +6,11 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use tracing_subscriber::EnvFilter;
 
+use image::DynamicImage;
+
 use x870e_lcd_core::{
-    load_and_prepare_jpeg, DisplayMode, FitMode, HardwareMonitor, HwLayout, LcdDevice,
-    SensorMetric,
+    encode_to_jpeg, process_image, DisplayMode, FitMode, HardwareMonitor, HwLayout, LcdDevice,
+    SensorMetric, SlotCatalog, SlotEntry,
 };
 
 #[derive(Parser)]
@@ -66,6 +68,9 @@ enum Commands {
         slot: u8,
     },
 
+    /// List all custom images registered in the local slot catalog
+    ListImages,
+
     /// Upload and display a custom image (PNG, JPEG, WebP, BMP, GIF)
     SetImage {
         /// Path to image file
@@ -79,9 +84,9 @@ enum Commands {
         #[arg(short, long, default_value_t = 90)]
         quality: u8,
 
-        /// Custom storage slot on panel (0, 1, 2, 3...)
-        #[arg(short, long, default_value_t = 0)]
-        slot: u8,
+        /// Custom storage slot on panel (0..=63). If omitted, automatically selects next free slot.
+        #[arg(short, long)]
+        slot: Option<u8>,
     },
 
     /// Run hardware telemetry daemon, updating CPU/GPU/fan stats
@@ -209,21 +214,55 @@ fn main() -> Result<()> {
             println!("Erasing custom image from motherboard SPI flash slot {}...", slot);
             let dev = LcdDevice::open()?;
             dev.delete_custom_image_slot(slot)?;
-            println!("✓ Custom image slot {} erased! Screen reverted to factory default wallpaper.", slot);
+            let mut catalog = SlotCatalog::load();
+            catalog.remove_slot(slot).context("Failed to update slot catalog")?;
+            println!("✓ Custom image slot {} erased from SPI flash and catalog! Screen reverted to factory default wallpaper.", slot);
+        }
+
+        Commands::ListImages => {
+            let catalog = SlotCatalog::load();
+            if catalog.slots.is_empty() {
+                println!("No custom images recorded in local catalog (0 / 256 slots used).");
+                println!("Use `x870e-lcd set-image <PATH>` to upload images.");
+            } else {
+                println!("Installed Custom Images ({}/256 slots used):", catalog.slots.len());
+                println!("{:<6} {:<24} {:<10} {:<24}", "Slot", "Title", "Size", "Original File");
+                println!("{:-<6} {:-<24} {:-<10} {:-<24}", "", "", "", "");
+                for (slot, entry) in &catalog.slots {
+                    let size_str = format!("{:.1} KB", entry.file_size_bytes as f64 / 1024.0);
+                    println!("{:<6} {:<24} {:<10} {:<24}", slot, entry.title, size_str, entry.original_filename);
+                }
+            }
         }
 
         Commands::SetImage { path, fit, quality, slot } => {
             if !path.exists() {
                 anyhow::bail!("Image file not found: {:?}", path);
             }
+            let mut catalog = SlotCatalog::load();
+            let target_slot = match slot {
+                Some(s) => s,
+                None => catalog.next_free_slot(256).context("No free custom flash slots available (0..=255 are all occupied)")?,
+            };
+            if slot.is_none() {
+                println!("Auto-allocated next available slot: Slot {}", target_slot);
+            }
+
             println!("Loading and processing {:?} (Fit: {:?}, Quality: {})...", path, fit, quality);
-            let jpeg_data = load_and_prepare_jpeg(&path, fit.into(), quality)
-                .context("Failed to process image")?;
-            println!("Encoded YUV 4:2:0 JPEG with standard JFIF components: {} bytes. Uploading to custom slot {}...", jpeg_data.len(), slot);
+            let img = image::open(&path).context("Failed to open image file")?;
+            let processed = process_image(&img, fit.into());
+            let jpeg_data = encode_to_jpeg(&processed, quality).context("Failed to encode JPEG")?;
+            println!("Encoded YUV 4:2:0 JPEG with standard JFIF components: {} bytes. Uploading to custom slot {}...", jpeg_data.len(), target_slot);
 
             let dev = LcdDevice::open()?;
-            dev.upload_and_display_jpeg(&jpeg_data, slot)?;
-            println!("✓ Image successfully uploaded and active in slot {}!", slot);
+            dev.upload_and_display_jpeg(&jpeg_data, target_slot)?;
+
+            let filename = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| format!("slot_{target_slot}"));
+            let entry = SlotEntry::new(target_slot, &filename, jpeg_data.len());
+            let dyn_img = DynamicImage::ImageRgb8(processed);
+            catalog.add_slot(entry, &dyn_img).context("Failed to update slot catalog")?;
+
+            println!("✓ Image successfully uploaded and active in slot {}!", target_slot);
         }
 
         Commands::Monitor { interval, layout, mut theme, temp_warning } => {
