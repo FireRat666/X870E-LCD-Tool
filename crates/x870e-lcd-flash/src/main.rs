@@ -26,7 +26,7 @@ use clap::Parser;
 use hidapi::{HidApi, HidDevice};
 use rusb::{DeviceHandle, GlobalContext};
 use tracing::debug;
-use x870e_lcd_patcher::{calculate_sum32, EXPECTED_FW_SIZE};
+use x870e_lcd_patcher::{calculate_sum32, is_streaming_patched, EXPECTED_FW_SIZE, STOCK_FW_SUM32};
 
 /// App firmware VID:PID ("Motherboard LCD Panel")
 const ASUS_VENDOR_ID: u16 = 0x0b05;
@@ -77,6 +77,10 @@ struct Cli {
     /// Skip the bootloader-entry magic (device already in update mode, PID 0x1c82)
     #[arg(long)]
     no_reboot: bool,
+
+    /// Allow flashing unrecognized or custom firmware images (bypasses stock/streaming-patch validation)
+    #[arg(long)]
+    allow_custom: bool,
 
     /// SPI NOR destination address
     #[arg(long, default_value_t = DEFAULT_FLASH_ADDR, value_parser = validate_flash_addr)]
@@ -249,7 +253,7 @@ fn rep_devrst() -> [u8; PACKET_LEN] {
 }
 
 /// Validates the image and (unless disabled) fixes the trailing Sum32 in place.
-fn prepare_image(path: &PathBuf, no_fix_checksum: bool) -> Result<Vec<u8>> {
+fn prepare_image(path: &PathBuf, no_fix_checksum: bool, allow_custom: bool) -> Result<Vec<u8>> {
     let mut image = fs::read(path).with_context(|| format!("Failed to read {}", path.display()))?;
     println!(
         "Image: {}  ({} bytes = 0x{:x})",
@@ -283,6 +287,25 @@ fn prepare_image(path: &PathBuf, no_fix_checksum: bool) -> Result<Vec<u8>> {
         image[last..].copy_from_slice(&calc.to_le_bytes());
         println!("  Sum32 fixed: 0x{stored:08x} -> 0x{calc:08x}");
     }
+
+    let is_stock = calc == STOCK_FW_SUM32 || stored == STOCK_FW_SUM32;
+    let is_patched = is_streaming_patched(&image);
+
+    if is_stock {
+        println!("  Firmware validation: Official Stock Image verified (Sum32 0x{STOCK_FW_SUM32:08x})");
+    } else if is_patched {
+        println!("  Firmware validation: Streaming Patched Image verified");
+    } else if allow_custom {
+        println!("  WARNING: Unrecognized or custom firmware image allowed via --allow-custom.");
+    } else {
+        bail!(
+            "Firmware verification failed: Image is neither recognized stock (Sum32 0x{STOCK_FW_SUM32:08x}) \
+             nor a verified streaming-patched firmware.\n\
+             Flashing an invalid image may permanently brick the LCD panel.\n\
+             To bypass this safety check and flash custom firmware, re-run with --allow-custom."
+        );
+    }
+
     Ok(image)
 }
 
@@ -336,7 +359,7 @@ fn run(cli: &Cli) -> Result<()> {
             DEFAULT_FLASH_ADDR
         );
     }
-    let image = prepare_image(&cli.firmware, cli.no_fix_checksum)?;
+    let image = prepare_image(&cli.firmware, cli.no_fix_checksum, cli.allow_custom)?;
 
     if image.len() % BULK_CHUNK_SIZE != 0 {
         println!(

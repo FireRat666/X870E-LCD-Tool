@@ -82,7 +82,7 @@ enum Commands {
         path: PathBuf,
 
         /// Crop to fill display instead of letterboxing
-        #[arg(long, default_value_t = true, action = clap::ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         fill: bool,
     },
 
