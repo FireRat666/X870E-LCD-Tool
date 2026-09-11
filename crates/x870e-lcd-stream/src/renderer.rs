@@ -72,7 +72,7 @@ impl ThemeColor {
             "purple" | "neon" | "neonpurple" => Some(Self::NeonPurple),
             _ => {
                 let hex = s.strip_prefix('#').unwrap_or(s);
-                if hex.len() == 6 {
+                if hex.is_ascii() && hex.len() == 6 {
                     if let (Ok(r), Ok(g), Ok(b)) = (
                         u8::from_str_radix(&hex[0..2], 16),
                         u8::from_str_radix(&hex[2..4], 16),
@@ -658,6 +658,7 @@ mod tests {
         assert_eq!(ThemeColor::parse("255, 128, 64"), Some(ThemeColor::Custom([255, 128, 64])));
         assert_eq!(ThemeColor::parse("rgb(10, 20, 30)"), Some(ThemeColor::Custom([10, 20, 30])));
         assert_eq!(ThemeColor::parse("invalid"), None);
+        assert_eq!(ThemeColor::parse("aébcd"), None);
     }
 
     #[test]
