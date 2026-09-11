@@ -18,6 +18,7 @@ pub struct VideoPlayer {
 }
 
 impl VideoPlayer {
+    /// Creates a new inactive video player instance.
     pub fn new() -> Self {
         Self {
             child: None,
@@ -60,9 +61,9 @@ impl VideoPlayer {
                 let scaled_w = (720.0 * zoom).round() as u32;
                 let scaled_h = (1280.0 * zoom).round() as u32;
 
-                // Scale first so image fills at least 720x1280, then crop with offset
+                // Scale first so image fills proportionally, pad to ensure at least 720x1280, then crop with offset
                 let crop_filter = format!(
-                    "scale={}:{}:force_original_aspect_ratio=increase,crop=720:1280:(in_w-720)/2+{}*(in_w-720)/2:(in_h-1280)/2+{}*(in_h-1280)/2",
+                    "scale={}:{}:force_original_aspect_ratio=increase,pad=max(iw\\,720):max(ih\\,1280):(ow-iw)/2:(oh-ih)/2:black,crop=720:1280:(in_w-720)/2+{}*(in_w-720)/2:(in_h-1280)/2+{}*(in_h-1280)/2",
                     scaled_w, scaled_h, pan_x, pan_y
                 );
                 filters.push(crop_filter);
@@ -174,6 +175,7 @@ impl VideoPlayer {
 }
 
 impl Drop for VideoPlayer {
+    /// Cleans up resources and ensures the background decoding child process is killed.
     fn drop(&mut self) {
         self.stop();
     }

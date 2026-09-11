@@ -37,6 +37,7 @@ pub enum SensorMetric {
 }
 
 impl SensorMetric {
+    /// Returns all available hardware telemetry metrics.
     pub fn all() -> &'static [SensorMetric] {
         &[
             SensorMetric::CpuTemp,
@@ -50,6 +51,7 @@ impl SensorMetric {
         ]
     }
 
+    /// Returns the human-readable display name for this metric.
     pub fn display_name(&self) -> &'static str {
         match self {
             SensorMetric::CpuTemp => "CPU Temperature (°C)",
@@ -116,6 +118,7 @@ pub struct HardwareMonitor {
 }
 
 impl HardwareMonitor {
+    /// Initializes a new hardware monitor with CPU, RAM, and network baseline telemetry.
     pub fn new() -> Self {
         let mut sys = System::new_with_specifics(
             RefreshKind::nothing()
@@ -123,7 +126,7 @@ impl HardwareMonitor {
                 .with_memory(MemoryRefreshKind::everything()),
         );
         sys.refresh_all();
-        let (rx, tx) = read_net_bytes();
+        let (rx, tx) = read_net_bytes().unwrap_or((0, 0));
         Self {
             sys,
             last_net_time: Instant::now(),
@@ -132,6 +135,7 @@ impl HardwareMonitor {
         }
     }
 
+    /// Refreshes all system metrics and returns a current telemetry snapshot.
     pub fn refresh(&mut self) -> TelemetrySnapshot {
         self.sys.refresh_cpu_all();
         self.sys.refresh_memory();
@@ -154,16 +158,19 @@ impl HardwareMonitor {
         let ram_usage_pct = if ram_total > 0.0 { (ram_used / ram_total) * 100.0 } else { 0.0 };
 
         // Calculate network transfer rates (KB/s)
-        let (current_rx, current_tx) = read_net_bytes();
-        let elapsed_secs = self.last_net_time.elapsed().as_secs_f32().max(0.1);
-        let rx_diff = current_rx.saturating_sub(self.last_rx_bytes);
-        let tx_diff = current_tx.saturating_sub(self.last_tx_bytes);
-        let net_rx_kbps = (rx_diff as f32 / elapsed_secs) / 1024.0;
-        let net_tx_kbps = (tx_diff as f32 / elapsed_secs) / 1024.0;
+        let mut net_rx_kbps = 0.0;
+        let mut net_tx_kbps = 0.0;
+        if let Some((current_rx, current_tx)) = read_net_bytes() {
+            let elapsed_secs = self.last_net_time.elapsed().as_secs_f32().max(0.1);
+            let rx_diff = current_rx.saturating_sub(self.last_rx_bytes);
+            let tx_diff = current_tx.saturating_sub(self.last_tx_bytes);
+            net_rx_kbps = (rx_diff as f32 / elapsed_secs) / 1024.0;
+            net_tx_kbps = (tx_diff as f32 / elapsed_secs) / 1024.0;
 
-        self.last_rx_bytes = current_rx;
-        self.last_tx_bytes = current_tx;
-        self.last_net_time = Instant::now();
+            self.last_rx_bytes = current_rx;
+            self.last_tx_bytes = current_tx;
+            self.last_net_time = Instant::now();
+        }
 
         TelemetrySnapshot {
             cpu_name,
@@ -185,31 +192,29 @@ impl HardwareMonitor {
 }
 
 /// Reads non-loopback network bytes from /proc/net/dev
-fn read_net_bytes() -> (u64, u64) {
-    if let Ok(content) = fs::read_to_string("/proc/net/dev") {
-        let mut total_rx = 0u64;
-        let mut total_tx = 0u64;
-        for line in content.lines().skip(2) {
-            let mut parts = line.split_whitespace();
-            if let Some(iface) = parts.next() {
-                if iface.starts_with("lo:") {
-                    continue;
+fn read_net_bytes() -> Option<(u64, u64)> {
+    let content = fs::read_to_string("/proc/net/dev").ok()?;
+    let mut total_rx = 0u64;
+    let mut total_tx = 0u64;
+    for line in content.lines().skip(2) {
+        let mut parts = line.split_whitespace();
+        if let Some(iface) = parts.next() {
+            if iface.starts_with("lo:") {
+                continue;
+            }
+            if let Some(rx_str) = parts.next() {
+                if let Ok(rx) = rx_str.parse::<u64>() {
+                    total_rx = total_rx.saturating_add(rx);
                 }
-                if let Some(rx_str) = parts.next() {
-                    if let Ok(rx) = rx_str.parse::<u64>() {
-                        total_rx = total_rx.saturating_add(rx);
-                    }
-                }
-                if let Some(tx_str) = parts.nth(7) {
-                    if let Ok(tx) = tx_str.parse::<u64>() {
-                        total_tx = total_tx.saturating_add(tx);
-                    }
+            }
+            if let Some(tx_str) = parts.nth(7) {
+                if let Ok(tx) = tx_str.parse::<u64>() {
+                    total_tx = total_tx.saturating_add(tx);
                 }
             }
         }
-        return (total_rx, total_tx);
     }
-    (0, 0)
+    Some((total_rx, total_tx))
 }
 
 /// Reads AMD CPU temperature from k10temp or zenpower in /sys/class/hwmon

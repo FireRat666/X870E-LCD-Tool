@@ -291,9 +291,9 @@ impl LcdDevice {
         self.send_hid_packet(&announce)?;
 
         // 2. Wait for ACK from controller (0xec 0x7f 0x00 ...)
-        let _ = self.wait_for_report(Duration::from_millis(500), |buf| {
+        self.wait_for_report(Duration::from_millis(500), |buf| {
             buf.len() >= 3 && buf[0] == 0xec && buf[1] == 0x7f && buf[2] == 0x00
-        });
+        })?;
 
         // 3. Write raw 3.68 MB frame data via USB Bulk Endpoint 2 OUT
         let transferred = self.usb_handle.write_bulk(

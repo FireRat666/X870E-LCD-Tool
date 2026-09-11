@@ -26,7 +26,7 @@ use clap::Parser;
 use hidapi::{HidApi, HidDevice};
 use rusb::{DeviceHandle, GlobalContext};
 use tracing::debug;
-use x870e_lcd_patcher::calculate_sum32;
+use x870e_lcd_patcher::{calculate_sum32, EXPECTED_FW_SIZE};
 
 /// App firmware VID:PID ("Motherboard LCD Panel")
 const ASUS_VENDOR_ID: u16 = 0x0b05;
@@ -42,6 +42,21 @@ const BULK_EP_OUT: u8 = 0x02;
 const DEFAULT_FLASH_ADDR: u32 = 0x0010_0000;
 const BULK_CHUNK_SIZE: usize = 4096;
 const BULK_ACK_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Validates that the flash address is at or above `DEFAULT_FLASH_ADDR`.
+fn validate_flash_addr(s: &str) -> Result<u32, String> {
+    let addr = if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        u32::from_str_radix(hex, 16).map_err(|e| format!("Invalid hex address: {e}"))?
+    } else {
+        s.parse::<u32>().map_err(|e| format!("Invalid address: {e}"))?
+    };
+    if addr < DEFAULT_FLASH_ADDR {
+        return Err(format!(
+            "Address 0x{addr:08x} is below minimum allowed address 0x{DEFAULT_FLASH_ADDR:08x} (bootloader region is protected)"
+        ));
+    }
+    Ok(addr)
+}
 
 #[derive(Parser)]
 #[command(name = "x870e-lcd-flash")]
@@ -64,7 +79,7 @@ struct Cli {
     no_reboot: bool,
 
     /// SPI NOR destination address
-    #[arg(long, default_value_t = DEFAULT_FLASH_ADDR)]
+    #[arg(long, default_value_t = DEFAULT_FLASH_ADDR, value_parser = validate_flash_addr)]
     addr: u32,
 }
 
@@ -118,11 +133,13 @@ fn open_device() -> Result<(HidDevice, DeviceHandle<GlobalContext>)> {
 }
 
 impl Flasher {
+    /// Opens the flasher by establishing both HID and bulk USB connections to the device.
     fn open() -> Result<Self> {
         let (hid, usb) = open_device()?;
         Ok(Self { hid, usb })
     }
 
+    /// Discards any pending unread HID input reports.
     fn drain(&self) {
         let mut buf = [0u8; PACKET_LEN];
         while self.hid.read_timeout(&mut buf, 20).unwrap_or(0) > 0 {}
@@ -181,6 +198,7 @@ impl Flasher {
     }
 }
 
+/// Builds the magic bootloader-entry command packet (ec 10 aa "ASUS" aa).
 fn rep_enter_bootloader() -> [u8; PACKET_LEN] {
     let mut p = [0u8; PACKET_LEN];
     p[0] = REPORT_ID;
@@ -189,6 +207,7 @@ fn rep_enter_bootloader() -> [u8; PACKET_LEN] {
     p
 }
 
+/// Builds the flash info probe packet (ec 8c).
 fn rep_info() -> [u8; PACKET_LEN] {
     let mut p = [0u8; PACKET_LEN];
     p[0] = REPORT_ID;
@@ -196,6 +215,7 @@ fn rep_info() -> [u8; PACKET_LEN] {
     p
 }
 
+/// Builds the flash erase / preparation command packet (ec 20 02 01 01 <addr> <size>).
 fn rep_erase(addr: u32, size: u32) -> [u8; PACKET_LEN] {
     let mut p = [0u8; PACKET_LEN];
     p[0] = REPORT_ID;
@@ -209,6 +229,7 @@ fn rep_erase(addr: u32, size: u32) -> [u8; PACKET_LEN] {
     p
 }
 
+/// Builds the bulk transfer size announcement packet (ec 7f 01 <size>).
 fn rep_announce(size: u32) -> [u8; PACKET_LEN] {
     let mut p = [0u8; PACKET_LEN];
     p[0] = REPORT_ID;
@@ -218,6 +239,7 @@ fn rep_announce(size: u32) -> [u8; PACKET_LEN] {
     p
 }
 
+/// Builds the device reset / reboot packet (ec 2f "DevRst").
 fn rep_devrst() -> [u8; PACKET_LEN] {
     let mut p = [0u8; PACKET_LEN];
     p[0] = REPORT_ID;
@@ -238,6 +260,14 @@ fn prepare_image(path: &PathBuf, no_fix_checksum: bool) -> Result<Vec<u8>> {
 
     if image.len() < 8 || image.len() % 4 != 0 {
         bail!("Image size {} is not a multiple of 4 (min 8 bytes)", image.len());
+    }
+
+    if image.len() != EXPECTED_FW_SIZE || image.len() % BULK_CHUNK_SIZE != 0 {
+        bail!(
+            "Invalid firmware size: {} bytes. Expected exactly {} bytes (4096-byte aligned)",
+            image.len(),
+            EXPECTED_FW_SIZE
+        );
     }
 
     let calc = calculate_sum32(&image)?;
@@ -297,7 +327,15 @@ fn enter_bootloader() -> Result<()> {
     Ok(())
 }
 
+/// Executes the complete firmware flashing pipeline based on CLI options.
 fn run(cli: &Cli) -> Result<()> {
+    if cli.addr < DEFAULT_FLASH_ADDR {
+        bail!(
+            "Invalid flash destination address: 0x{:08x}. Addresses below 0x{:08x} are protected bootloader regions",
+            cli.addr,
+            DEFAULT_FLASH_ADDR
+        );
+    }
     let image = prepare_image(&cli.firmware, cli.no_fix_checksum)?;
 
     if image.len() % BULK_CHUNK_SIZE != 0 {
@@ -391,6 +429,7 @@ fn run(cli: &Cli) -> Result<()> {
     Ok(())
 }
 
+/// Main entry point for the x870e-lcd-flash CLI utility.
 fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     let cli = Cli::parse();

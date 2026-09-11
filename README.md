@@ -41,15 +41,15 @@ A native, high-performance Linux driver, CLI daemon, and desktop GUI written in 
 ### Option A: Precompiled Release Binaries
 
 Prebuilt standalone Linux binaries are available in the [GitHub Releases](../../releases) section:
-1. Download `x870e-lcd-gui` and `x870e-lcd`.
+1. Download the release binaries: `x870e-lcd-stream`, `x870e-lcd-patcher`, `x870e-lcd-flash`, `x870e-lcd-gui`, and `x870e-lcd` (or the archive `x870e-lcd-tools-linux-x86_64-*.tar.gz`).
 2. Make them executable:
    ```bash
-   chmod +x x870e-lcd-gui x870e-lcd
+   chmod +x x870e-lcd-stream x870e-lcd-patcher x870e-lcd-flash x870e-lcd-gui x870e-lcd
    ```
 3. (Optional) Copy them to your user bin directory:
    ```bash
    mkdir -p ~/.local/bin
-   cp x870e-lcd-gui x870e-lcd ~/.local/bin/
+   cp x870e-lcd-stream x870e-lcd-patcher x870e-lcd-flash x870e-lcd-gui x870e-lcd ~/.local/bin/
    ```
 
 ---

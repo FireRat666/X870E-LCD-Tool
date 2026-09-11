@@ -19,6 +19,7 @@ pub enum ThemeColor {
 }
 
 impl ThemeColor {
+    /// Returns the primary accent color as [B, G, R, A].
     pub fn accent_bgra(&self) -> [u8; 4] {
         match self {
             Self::RogRed => [0x22, 0x22, 0xee, 0xff],      // Bright Red
@@ -29,10 +30,12 @@ impl ThemeColor {
         }
     }
 
+    /// Returns the background canvas color as [B, G, R, A].
     pub fn bg_bgra(&self) -> [u8; 4] {
         [0x12, 0x10, 0x10, 0xff] // Deep dark background
     }
 
+    /// Returns the card surface color as [B, G, R, A].
     pub fn card_bgra(&self) -> [u8; 4] {
         [0x24, 0x20, 0x20, 0xff] // Card background
     }
@@ -50,6 +53,7 @@ pub enum DashboardSection {
 }
 
 impl DashboardSection {
+    /// Returns the human-readable display label for this dashboard slot option.
     pub fn label(&self) -> &'static str {
         match self {
             Self::None => "(Empty / Disabled)",
@@ -97,6 +101,7 @@ pub struct DashboardData {
 }
 
 impl Default for DashboardData {
+    /// Returns default dashboard layout metrics and sample telemetry state.
     fn default() -> Self {
         Self {
             title: "ROG CROSSHAIR X870E".to_string(),
@@ -131,6 +136,7 @@ impl Default for DashboardData {
     }
 }
 
+/// Renders right-aligned text ending at right_x on a BGRA frame buffer.
 pub fn draw_text_right_aligned_bgra(
     buffer: &mut [u8],
     stride_width: usize,
@@ -148,6 +154,7 @@ pub fn draw_text_right_aligned_bgra(
     draw_text_bgra(buffer, stride_width, stride_height, start_x, y, text, color, scale);
 }
 
+/// Fills a solid rectangle with color [B, G, R, A] into a 720x1280 BGRA buffer.
 pub fn fill_rect_bgra(
     buffer: &mut [u8],
     rx: usize,
@@ -171,6 +178,7 @@ pub fn fill_rect_bgra(
     }
 }
 
+/// Draws an unfilled rectangular border with the specified thickness and color.
 pub fn draw_border_bgra(
     buffer: &mut [u8],
     rx: usize,
@@ -186,6 +194,7 @@ pub fn draw_border_bgra(
     fill_rect_bgra(buffer, rx + rw.saturating_sub(thickness), ry, thickness, rh, color);
 }
 
+/// Draws a horizontal progress / gauge bar with filled percentage.
 pub fn draw_bar_bgra(
     buffer: &mut [u8],
     x: usize,
@@ -262,12 +271,8 @@ pub fn render_dashboard(data: &DashboardData, buffer: &mut [u8]) {
 
                 draw_text_bgra(buffer, WIDTH, HEIGHT, card_x + 24, current_y + 20, "PROCESSOR (CPU)", accent, 3);
 
-                let cpu_short = if data.cpu_name.len() > 22 {
-                    &data.cpu_name[..22]
-                } else {
-                    &data.cpu_name
-                };
-                draw_text_bgra(buffer, WIDTH, HEIGHT, card_x + 24, current_y + 58, cpu_short, white, 2);
+                let cpu_short: String = data.cpu_name.chars().take(22).collect();
+                draw_text_bgra(buffer, WIDTH, HEIGHT, card_x + 24, current_y + 58, &cpu_short, white, 2);
 
                 let load_str = format!("LOAD: {:.1}%", data.cpu_usage);
                 let temp_str = format!("TEMP: {:.1} C", data.cpu_temp);
@@ -299,12 +304,8 @@ pub fn render_dashboard(data: &DashboardData, buffer: &mut [u8]) {
 
                 draw_text_bgra(buffer, WIDTH, HEIGHT, card_x + 24, current_y + 20, "GRAPHICS (GPU)", accent, 3);
 
-                let gpu_short = if data.gpu_name.len() > 22 {
-                    &data.gpu_name[..22]
-                } else {
-                    &data.gpu_name
-                };
-                draw_text_bgra(buffer, WIDTH, HEIGHT, card_x + 24, current_y + 58, gpu_short, white, 2);
+                let gpu_short: String = data.gpu_name.chars().take(22).collect();
+                draw_text_bgra(buffer, WIDTH, HEIGHT, card_x + 24, current_y + 58, &gpu_short, white, 2);
 
                 let load_str = format!("LOAD: {:.0}%", data.gpu_usage);
                 let temp_str = format!("TEMP: {:.0} C", data.gpu_temp);

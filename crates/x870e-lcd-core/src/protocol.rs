@@ -27,6 +27,7 @@ pub enum HwLayout {
 }
 
 impl HwLayout {
+    /// Returns the number of telemetry slots displayed for this layout mode.
     pub fn slot_count(&self) -> usize {
         match self {
             HwLayout::Single => 1,
@@ -192,6 +193,7 @@ pub mod upload {
         (p1, p2)
     }
 
+    /// Step 1: Upload preparation command (Cmd 0x71 0x01 0x01)
     pub fn step1_prep() -> [u8; PACKET_LEN] {
         let mut pkt = new_packet();
         pkt[1] = 0x71;
@@ -200,6 +202,7 @@ pub mod upload {
         pkt
     }
 
+    /// Step 2: Upload synchronization command (Cmd 0xf1)
     pub fn step2_sync() -> [u8; PACKET_LEN] {
         let mut pkt = new_packet();
         pkt[1] = 0xf1;
@@ -216,6 +219,7 @@ pub mod upload {
         pkt
     }
 
+    /// Step 4: Bulk transfer start handshake (Cmd 0x73 0x01)
     pub fn step4_start() -> [u8; PACKET_LEN] {
         let mut pkt = new_packet();
         pkt[1] = 0x73;
@@ -223,6 +227,7 @@ pub mod upload {
         pkt
     }
 
+    /// Step 5: Announces the upcoming payload size in little-endian format (Cmd 0x7f 0x02 [size_le32])
     pub fn step5_size_header(jpeg_size: u32) -> [u8; PACKET_LEN] {
         let mut pkt = new_packet();
         pkt[1] = 0x7f;
@@ -232,6 +237,7 @@ pub mod upload {
         pkt
     }
 
+    /// Step 6: Finalize flash write after all bulk chunks have transferred (Cmd 0x73 0xff)
     pub fn step6_finalize() -> [u8; PACKET_LEN] {
         let mut pkt = new_packet();
         pkt[1] = 0x73;

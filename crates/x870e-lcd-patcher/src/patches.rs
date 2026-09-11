@@ -137,15 +137,39 @@ pub fn apply_patches(data: &mut [u8], patches: &[&Patch]) -> Result<u32, PatchEr
 
     // Step 1: Verify all safety assertions before modifying anything
     for patch in patches {
-        let end = patch.offset + patch.expected.len();
-        if end > data.len() {
+        if patch.expected.len() != patch.replacement.len() {
+            return Err(PatchError::InvalidSize {
+                expected: patch.expected.len(),
+                actual: patch.replacement.len(),
+            });
+        }
+        let exp_end = patch.offset.checked_add(patch.expected.len())
+            .ok_or(PatchError::OutOfBounds {
+                offset: patch.offset,
+                len: patch.expected.len(),
+                size: data.len(),
+            })?;
+        if exp_end > data.len() {
             return Err(PatchError::OutOfBounds {
                 offset: patch.offset,
                 len: patch.expected.len(),
                 size: data.len(),
             });
         }
-        let current_bytes = &data[patch.offset..end];
+        let rep_end = patch.offset.checked_add(patch.replacement.len())
+            .ok_or(PatchError::OutOfBounds {
+                offset: patch.offset,
+                len: patch.replacement.len(),
+                size: data.len(),
+            })?;
+        if rep_end > data.len() {
+            return Err(PatchError::OutOfBounds {
+                offset: patch.offset,
+                len: patch.replacement.len(),
+                size: data.len(),
+            });
+        }
+        let current_bytes = &data[patch.offset..exp_end];
         if current_bytes != patch.expected {
             return Err(PatchError::SafetyAssertionFailed {
                 name: patch.name,
@@ -158,7 +182,7 @@ pub fn apply_patches(data: &mut [u8], patches: &[&Patch]) -> Result<u32, PatchEr
 
     // Step 2: Apply all replacement bytes
     for patch in patches {
-        let end = patch.offset + patch.replacement.len();
+        let end = patch.offset.checked_add(patch.replacement.len()).unwrap();
         data[patch.offset..end].copy_from_slice(patch.replacement);
     }
 
@@ -194,11 +218,17 @@ pub struct ByteDiff {
     pub patched: u8,
 }
 
-/// Compares two firmware buffers and returns all changed bytes
-pub fn diff_firmware(orig: &[u8], patched: &[u8]) -> Vec<ByteDiff> {
-    let min_len = orig.len().min(patched.len());
+/// Compares two firmware buffers and returns all changed bytes.
+/// Returns an error if the buffers have different lengths.
+pub fn diff_firmware(orig: &[u8], patched: &[u8]) -> Result<Vec<ByteDiff>, PatchError> {
+    if orig.len() != patched.len() {
+        return Err(PatchError::InvalidSize {
+            expected: orig.len(),
+            actual: patched.len(),
+        });
+    }
     let mut diffs = Vec::new();
-    for i in 0..min_len {
+    for i in 0..orig.len() {
         if orig[i] != patched[i] {
             diffs.push(ByteDiff {
                 offset: i,
@@ -207,7 +237,7 @@ pub fn diff_firmware(orig: &[u8], patched: &[u8]) -> Vec<ByteDiff> {
             });
         }
     }
-    diffs
+    Ok(diffs)
 }
 
 #[cfg(test)]
@@ -261,6 +291,33 @@ mod tests {
         assert_eq!(calc, sum);
         assert_eq!(stored, sum);
         assert!(is_streaming_patched(&data));
+    }
+
+    #[test]
+    fn test_diff_firmware() {
+        let a = vec![1, 2, 3, 4];
+        let b = vec![1, 99, 3, 4];
+        let diffs = diff_firmware(&a, &b).unwrap();
+        assert_eq!(diffs.len(), 1);
+        assert_eq!(diffs[0].offset, 1);
+        assert_eq!(diffs[0].original, 2);
+        assert_eq!(diffs[0].patched, 99);
+
+        // Identical
+        let diffs_same = diff_firmware(&a, &a).unwrap();
+        assert!(diffs_same.is_empty());
+
+        // Length mismatch
+        let c = vec![1, 2, 3];
+        let err = diff_firmware(&a, &c);
+        assert!(err.is_err());
+        match err.unwrap_err() {
+            PatchError::InvalidSize { expected, actual } => {
+                assert_eq!(expected, 4);
+                assert_eq!(actual, 3);
+            }
+            other => panic!("Unexpected error: {:?}", other),
+        }
     }
 }
 

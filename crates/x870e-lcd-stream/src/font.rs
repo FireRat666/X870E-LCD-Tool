@@ -4,16 +4,18 @@ pub const FONT_WIDTH: usize = 8;
 #[allow(dead_code)]
 pub const FONT_HEIGHT: usize = 8;
 
-// Basic ASCII 32..126 bitmap font (8 bytes per char, 1 bit per pixel, MSB left)
+/// Returns the 8x8 bitmap glyph representation for an ASCII character.
+/// Falls back to '?' for unknown or non-ASCII characters.
 pub fn get_glyph(c: char) -> &'static [u8; 8] {
     let ascii = c as usize;
     if (32..=126).contains(&ascii) {
         &BASIC_FONT[ascii - 32]
     } else {
-        &BASIC_FONT[63] // '?' for unknown
+        &BASIC_FONT[31] // '?' for unknown (ASCII 63 - 32 = 31)
     }
 }
 
+/// Renders a text string into a BGRA8888 frame buffer at the specified coordinates and scale.
 pub fn draw_text_bgra(
     buffer: &mut [u8],
     stride_width: usize,

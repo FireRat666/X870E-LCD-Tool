@@ -12,6 +12,7 @@ pub enum ScaleMode {
 }
 
 impl ScaleMode {
+    /// Returns the human-readable label describing this scaling mode.
     pub fn label(&self) -> &'static str {
         match self {
             Self::Fill => "Fill (Crop to 9:16)",
@@ -31,6 +32,7 @@ pub enum Rotation {
 }
 
 impl Rotation {
+    /// Returns the human-readable label describing this rotation orientation.
     pub fn label(&self) -> &'static str {
         match self {
             Self::Rot0 => "0° (Default)",
@@ -52,6 +54,7 @@ pub struct MediaConfig {
 }
 
 impl Default for MediaConfig {
+    /// Default configuration: Aspect Fill, 0° rotation, 1.0x zoom, centered pan, continuous looping.
     fn default() -> Self {
         Self {
             scale_mode: ScaleMode::Fill,
@@ -125,8 +128,12 @@ pub fn process_image_to_bgra(img: &DynamicImage, config: &MediaConfig, buffer: &
             let zoom = config.zoom.clamp(0.2, 5.0);
             let effective_ratio = base_ratio * zoom;
 
-            let crop_w = ((WIDTH as f32 / effective_ratio).round() as u32).clamp(10, src_w);
-            let crop_h = ((HEIGHT as f32 / effective_ratio).round() as u32).clamp(10, src_h);
+            let crop_w = ((WIDTH as f32 / effective_ratio).round() as u32)
+                .min(src_w)
+                .clamp(10.min(src_w), src_w);
+            let crop_h = ((HEIGHT as f32 / effective_ratio).round() as u32)
+                .min(src_h)
+                .clamp(10.min(src_h), src_h);
 
             // Compute center with pan offset
             let max_pan_x = (src_w.saturating_sub(crop_w)) as f32 / 2.0;
@@ -145,6 +152,7 @@ pub fn process_image_to_bgra(img: &DynamicImage, config: &MediaConfig, buffer: &
     }
 }
 
+/// Blits a DynamicImage onto the 720x1280 BGRA frame buffer at the given destination offset.
 fn copy_image_to_bgra_buffer(img: &DynamicImage, buffer: &mut [u8], offset_x: usize, offset_y: usize) {
     let (w, h) = img.dimensions();
     let rgba_img = img.to_rgba8();

@@ -16,6 +16,7 @@ pub struct StreamerStats {
 }
 
 impl StreamerStats {
+    /// Initializes streaming statistics with zero frames and idle status.
     pub fn new() -> Self {
         Self {
             frames_sent: Arc::new(AtomicU32::new(0)),
@@ -24,6 +25,7 @@ impl StreamerStats {
         }
     }
 
+    /// Returns the current moving average frame rate in frames per second.
     pub fn get_fps(&self) -> f32 {
         self.current_fps.lock().map(|g| *g).unwrap_or(0.0)
     }
@@ -35,6 +37,7 @@ pub struct StreamerHandle {
 }
 
 impl StreamerHandle {
+    /// Requests the streaming thread to stop and joins the worker thread.
     pub fn stop(&mut self) {
         self.stats.running.store(false, Ordering::SeqCst);
         if let Some(h) = self.join_handle.take() {
@@ -42,12 +45,14 @@ impl StreamerHandle {
         }
     }
 
+    /// Returns a reference to the shared streaming statistics.
     pub fn stats(&self) -> &StreamerStats {
         &self.stats
     }
 }
 
 impl Drop for StreamerHandle {
+    /// Automatically stops the background streaming worker when dropped.
     fn drop(&mut self) {
         self.stop();
     }

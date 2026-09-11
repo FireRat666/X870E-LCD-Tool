@@ -47,6 +47,7 @@ enum Commands {
     },
 }
 
+/// Main entry point for the x870e-lcd-patcher CLI utility.
 fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     let cli = Cli::parse();
@@ -58,6 +59,7 @@ fn main() -> Result<()> {
     }
 }
 
+/// Displays detailed information, checksum, and patch status for a firmware binary.
 fn handle_info(path: &Path) -> Result<()> {
     let data = fs::read(path).with_context(|| format!("Failed to read {}", path.display()))?;
     println!("=== Firmware Binary Info: {} ===", path.display());
@@ -95,6 +97,7 @@ fn handle_info(path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Applies the video streaming patch to an official stock firmware image.
 fn handle_patch(input: &Path, output: &Path) -> Result<()> {
     let mut data = fs::read(input).with_context(|| format!("Failed to read {}", input.display()))?;
     if data.len() < EXPECTED_FW_SIZE {
@@ -102,6 +105,24 @@ fn handle_patch(input: &Path, output: &Path) -> Result<()> {
             "Input file size ({} bytes) is smaller than expected 0109 firmware ({} bytes)",
             data.len(),
             EXPECTED_FW_SIZE
+        );
+    }
+    if data.len() != EXPECTED_FW_SIZE {
+        bail!(
+            "Input file size ({} bytes) does not match expected 0109 firmware ({} bytes)",
+            data.len(),
+            EXPECTED_FW_SIZE
+        );
+    }
+
+    let (calc, _stored) = verify_checksum(&data)
+        .context("Input firmware failed checksum verification")?;
+
+    if calc != STOCK_FW_SUM32 && !is_streaming_patched(&data) {
+        bail!(
+            "Input firmware checksum (0x{:08x}) does not match stock 0109 firmware (0x{:08x})",
+            calc,
+            STOCK_FW_SUM32
         );
     }
 
@@ -137,6 +158,7 @@ fn handle_patch(input: &Path, output: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Compares two firmware binaries byte-by-byte and displays diff groups.
 fn handle_diff(orig_path: &Path, mod_path: &Path) -> Result<()> {
     let orig = fs::read(orig_path).with_context(|| format!("Failed to read {}", orig_path.display()))?;
     let modified = fs::read(mod_path).with_context(|| format!("Failed to read {}", mod_path.display()))?;
@@ -144,7 +166,7 @@ fn handle_diff(orig_path: &Path, mod_path: &Path) -> Result<()> {
     println!("=== Comparing {} vs {} ===", orig_path.display(), mod_path.display());
     println!("Original size: {} bytes, Modified size: {} bytes", orig.len(), modified.len());
 
-    let diffs = diff_firmware(&orig, &modified);
+    let diffs = diff_firmware(&orig, &modified)?;
     if diffs.is_empty() {
         println!("Files are identical. No differences found.");
         return Ok(());
@@ -172,7 +194,7 @@ fn handle_diff(orig_path: &Path, mod_path: &Path) -> Result<()> {
         for b in &mod_chunk {
             print!("{:02x} ", b);
         }
-        if start == orig.len() - 4 {
+        if orig.len() >= 4 && start == orig.len() - 4 {
             print!(" (Sum32 Checksum)");
         } else if let Some(p) = STREAMING_PATCHES.iter().find(|p| p.offset == start) {
             print!(" ({}: {})", p.name, p.description);

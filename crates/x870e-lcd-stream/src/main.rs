@@ -82,7 +82,7 @@ enum Commands {
         path: PathBuf,
 
         /// Crop to fill display instead of letterboxing
-        #[arg(long, default_value_t = true)]
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
         fill: bool,
     },
 
@@ -94,6 +94,7 @@ enum Commands {
     },
 }
 
+/// Main entry point for the x870e-lcd-stream application.
 fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     let cli = Cli::parse();
@@ -108,6 +109,7 @@ fn main() -> Result<()> {
     }
 }
 
+/// Launches the interactive desktop GUI for the LCD live streamer.
 fn launch_gui() -> Result<()> {
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
@@ -125,6 +127,7 @@ fn launch_gui() -> Result<()> {
     .map_err(|e| anyhow::anyhow!("GUI error: {}", e))
 }
 
+/// Streams real-time hardware telemetry dashboard to the LCD panel via CLI.
 fn run_cli_dashboard(title: String, theme_name: &str, pacing_ms: u64) -> Result<()> {
     let theme = match theme_name.to_lowercase().as_str() {
         "cyber" => ThemeColor::CyberCyan,
@@ -175,14 +178,26 @@ fn run_cli_dashboard(title: String, theme_name: &str, pacing_ms: u64) -> Result<
         pacing_ms,
     )?;
 
-    // Wait for Ctrl+C
+    // Wait for Ctrl+C or worker termination
+    wait_for_stream(handle)
+}
+
+/// Waits for a stream to complete or until interrupted by SIGINT (Ctrl+C).
+fn wait_for_stream(mut handle: streamer::StreamerHandle) -> Result<()> {
+    let running = handle.stats().running.clone();
+    let _ = ctrlc::set_handler(move || {
+        running.store(false, std::sync::atomic::Ordering::SeqCst);
+    });
+
     while handle.stats().running.load(std::sync::atomic::Ordering::SeqCst) {
-        std::thread::sleep(Duration::from_millis(500));
+        std::thread::sleep(Duration::from_millis(100));
     }
 
+    handle.stop();
     Ok(())
 }
 
+/// Plays and streams a video file to the LCD panel via CLI.
 fn run_cli_video(path: &PathBuf, pacing_ms: u64, scale: &str, rotation: u32) -> Result<()> {
     let mut config = media::MediaConfig::default();
     config.scale_mode = match scale.to_lowercase().as_str() {
@@ -211,13 +226,10 @@ fn run_cli_video(path: &PathBuf, pacing_ms: u64, scale: &str, rotation: u32) -> 
         pacing_ms,
     )?;
 
-    while handle.stats().running.load(std::sync::atomic::Ordering::SeqCst) {
-        std::thread::sleep(Duration::from_millis(500));
-    }
-
-    Ok(())
+    wait_for_stream(handle)
 }
 
+/// Streams a dynamic test pattern to the LCD panel via CLI.
 fn run_cli_pattern(pattern: &str, pacing_ms: u64) -> Result<()> {
     let pattern_owned = pattern.to_string();
     let mut frame_count = 0u32;
@@ -234,13 +246,10 @@ fn run_cli_pattern(pattern: &str, pacing_ms: u64) -> Result<()> {
         pacing_ms,
     )?;
 
-    while handle.stats().running.load(std::sync::atomic::Ordering::SeqCst) {
-        std::thread::sleep(Duration::from_millis(500));
-    }
-
-    Ok(())
+    wait_for_stream(handle)
 }
 
+/// Renders and displays a single static image on the LCD panel via FrameStream mode.
 fn run_cli_image(path: &PathBuf, fill: bool) -> Result<()> {
     let img = image::open(path).with_context(|| format!("Failed to open image file: {}", path.display()))?;
     let mut frame_buf = vec![0u8; FRAME_RAW_SIZE];
@@ -256,6 +265,7 @@ fn run_cli_image(path: &PathBuf, fill: bool) -> Result<()> {
     Ok(())
 }
 
+/// Streams raw 720x1280 BGRA frames read from standard input to the LCD panel.
 fn run_cli_pipe(pacing_ms: u64) -> Result<()> {
     println!("Streaming raw 720x1280 BGRA frames from stdin (pacing: {}ms)...", pacing_ms);
     let mut stdin = io::stdin();
@@ -274,9 +284,5 @@ fn run_cli_pipe(pacing_ms: u64) -> Result<()> {
         pacing_ms,
     )?;
 
-    while handle.stats().running.load(std::sync::atomic::Ordering::SeqCst) {
-        std::thread::sleep(Duration::from_millis(500));
-    }
-
-    Ok(())
+    wait_for_stream(handle)
 }

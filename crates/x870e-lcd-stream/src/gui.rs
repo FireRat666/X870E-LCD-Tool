@@ -59,6 +59,7 @@ pub struct StreamGuiApp {
 }
 
 impl StreamGuiApp {
+    /// Creates and initializes the GUI application state with default dashboard telemetry.
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let mut hw_mon = HardwareMonitor::new();
         let snap = hw_mon.refresh();
@@ -106,6 +107,7 @@ impl StreamGuiApp {
         }
     }
 
+    /// Periodically queries hardware sensors to refresh dashboard telemetry.
     fn update_telemetry(&mut self) {
         if self.last_hw_update.elapsed() >= Duration::from_millis(500) {
             let snap = self.hw_mon.refresh();
@@ -141,6 +143,7 @@ impl StreamGuiApp {
         }
     }
 
+    /// Generates the next BGRA8888 frame according to current mode and media settings.
     fn generate_current_frame(&mut self, buffer: &mut [u8]) {
         match self.mode {
             StreamMode::Dashboard => {
@@ -172,6 +175,7 @@ impl StreamGuiApp {
         }
     }
 
+    /// Loads an image or video media file and configures decoder / preview textures.
     fn load_media_file(&mut self, path: PathBuf, ctx: &egui::Context) {
         let ext = path.extension()
             .and_then(|e| e.to_str())
@@ -220,6 +224,7 @@ impl StreamGuiApp {
         }
     }
 
+    /// Synchronizes zoom, pan, and rotation configuration with the running video player.
     fn sync_video_config(&mut self) {
         if self.media_kind == MediaKind::Video {
             if let Ok(mut player) = self.video_player.lock() {
@@ -228,6 +233,7 @@ impl StreamGuiApp {
         }
     }
 
+    /// Connects to the LCD panel and starts background frame streaming.
     fn start_streaming(&mut self) {
         if self.is_streaming {
             return;
@@ -297,6 +303,7 @@ impl StreamGuiApp {
         self.stream_thread = Some(handle);
     }
 
+    /// Stops active background frame streaming and joins the streaming thread.
     fn stop_streaming(&mut self) {
         if !self.is_streaming {
             return;
@@ -313,6 +320,7 @@ impl StreamGuiApp {
 }
 
 impl eframe::App for StreamGuiApp {
+    /// Renders the GUI interface and processes egui events for each frame.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Dynamic repaint based on media/pacing
         let repaint_ms = if self.pacing_ms > 0 { self.pacing_ms.min(250) } else { 100 };
