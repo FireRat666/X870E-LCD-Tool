@@ -1,0 +1,15 @@
+[package]
+name = "x870e-lcd-flash"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+hidapi = { workspace = true }
+rusb = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+x870e-lcd-patcher = { path = "../x870e-lcd-patcher" }

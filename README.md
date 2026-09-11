@@ -30,6 +30,9 @@ A native, high-performance Linux driver, CLI daemon, and desktop GUI written in 
 - **Backlight Brightness**: Smooth brightness adjustment from 0% to 100% with quick preset buttons.
 - **Desktop GUI (`x870e-lcd-gui`)**: Sleek ROG-themed desktop interface built with `egui` featuring real-time 720x1280 screen previews, live sensor slot mapping, asynchronous non-blocking image flashing worker, and dedicated power/safety controls.
 - **Headless CLI (`x870e-lcd`)**: Lightweight binary for scripting, keybinds, and running background systemd telemetry services.
+- **Live Screen Streamer (`x870e-lcd-stream`)**: Stream live 720×1280 video, real-time custom telemetry dashboards, test patterns, or raw video piped from `ffmpeg` directly to the panel with both CLI and GUI interfaces.
+- **Firmware Patcher (`x870e-lcd-patcher`)**: Applies the verified tear-free live video streaming patch to stock ASUS FW 0109 with automatic Sum32 checksum calculation.
+- **Native USB Firmware Flasher (`x870e-lcd-flash`)**: Experimental Linux tool to flash firmware directly to the panel over USB without Windows.
 
 ---
 
@@ -38,15 +41,15 @@ A native, high-performance Linux driver, CLI daemon, and desktop GUI written in 
 ### Option A: Precompiled Release Binaries
 
 Prebuilt standalone Linux binaries are available in the [GitHub Releases](../../releases) section:
-1. Download `x870e-lcd-gui` and `x870e-lcd`.
+1. Download the release binaries: `x870e-lcd-stream`, `x870e-lcd-patcher`, `x870e-lcd-flash`, `x870e-lcd-gui`, and `x870e-lcd` (or the archive `x870e-lcd-tools-linux-x86_64-*.tar.gz`).
 2. Make them executable:
    ```bash
-   chmod +x x870e-lcd-gui x870e-lcd
+   chmod +x x870e-lcd-stream x870e-lcd-patcher x870e-lcd-flash x870e-lcd-gui x870e-lcd
    ```
 3. (Optional) Copy them to your user bin directory:
    ```bash
    mkdir -p ~/.local/bin
-   cp x870e-lcd-gui x870e-lcd ~/.local/bin/
+   cp x870e-lcd-stream x870e-lcd-patcher x870e-lcd-flash x870e-lcd-gui x870e-lcd ~/.local/bin/
    ```
 
 ---
@@ -85,11 +88,17 @@ cargo build --release
 The compiled binaries will be generated at:
 - **GUI Application**: `target/release/x870e-lcd-gui`
 - **CLI Tool**: `target/release/x870e-lcd`
+- **Live Screen Streamer**: `target/release/x870e-lcd-stream`
+- **Firmware Patcher**: `target/release/x870e-lcd-patcher`
+- **USB Firmware Flasher**: `target/release/x870e-lcd-flash`
 
 #### 3. (Optional) Install System-Wide
 ```bash
 sudo install -Dm755 target/release/x870e-lcd-gui /usr/local/bin/
 sudo install -Dm755 target/release/x870e-lcd /usr/local/bin/
+sudo install -Dm755 target/release/x870e-lcd-stream /usr/local/bin/
+sudo install -Dm755 target/release/x870e-lcd-patcher /usr/local/bin/
+sudo install -Dm755 target/release/x870e-lcd-flash /usr/local/bin/
 ```
 
 ---
@@ -254,29 +263,114 @@ journalctl --user -u x870e-lcd.service -f
 
 ---
 
-## Protocol Architecture & Notes
+## Live Screen Streaming (`x870e-lcd-stream`)
 
-- **USB Device**: Vendor ID `0x0b05`, Product ID `0x1c83`.
-- **Interface 0 (Vendor-Specific Bulk)**:
-  - Bulk Endpoint `0x02` OUT streams 4096-byte blocks of JFIF baseline JPEG data directly to the onboard microcontroller's SPI flash memory.
-- **Interface 1 (HID Command Channel)**:
-  - Report ID `0xEC`: 64-byte payload controlling mode selection (`0x51`), visual themes & layout (`0x52`), telemetry text slots (`0x53`), backlight brightness (`0x5C`), and upload handshake headers (`0x71`, `0x72`, `0x73`, `0x7F`).
-  - Report ID `0xEE`: Device ACK and flash commit status notifications on Endpoint `0x81` IN.
-- **Hardware Notes**:
-  - The motherboard firmware only possesses Multi Info gauge graphical assets for **Theme Style 3**. Styles 1, 2, 4, 5, 6 are designed for Single, Dual, and Triple gauge layouts.
+Stream custom 720×1280 content directly to the onboard LCD panel at ~2.0 FPS with zero tearing (requires the patched firmware).
+
+### 1. Interactive Desktop GUI
+Launch the graphical streaming console:
+```bash
+./target/release/x870e-lcd-stream
+# or explicitly:
+./target/release/x870e-lcd-stream gui
+```
+- **Live 720×1280 Preview**: Renders real-time WYSIWYG display preview.
+- **Source Selection**: Switch between Live System Dashboard, Test Patterns, and Custom Images.
+- **Visual Customization**: Choose between themes (ROG Red, Cyber Cyan, Matrix Green, Amber Gold, Neon Purple) and customize dashboard titles.
+- **Hardware Pacing Slider**: Control settling delays (250ms default for rock-solid tear-free playback).
+
+### 2. Headless Telemetry Dashboard (CLI)
+Run a live system dashboard headlessly with real-time CPU, GPU, RAM, clock, and load metrics:
+```bash
+# Default ROG Red theme
+./target/release/x870e-lcd-stream dashboard
+
+# Custom Cyber Cyan theme and title
+./target/release/x870e-lcd-stream dashboard --title "EXTREME RIG" --theme cyber --pacing-ms 250
+```
+
+### 3. Display Test Patterns
+```bash
+./target/release/x870e-lcd-stream pattern vertical-split
+./target/release/x870e-lcd-stream pattern colorbars
+./target/release/x870e-lcd-stream pattern gradient
+```
+
+### 4. Stream Video / Animations with FFmpeg
+Pipe any video or animated GIF straight from `ffmpeg` into `x870e-lcd-stream pipe`:
+```bash
+ffmpeg -re -i my_video.mp4 -vf "scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280" -f rawvideo -pix_fmt bgra - | ./target/release/x870e-lcd-stream pipe
+```
 
 ---
 
-## ⚠️ Disclaimer & Emergency Recovery
+## Firmware Patcher (`x870e-lcd-patcher`)
 
-### Disclaimer
-This software is experimental. Communicating directly with the motherboard's onboard display microcontroller (`0b05:1c83`) and writing custom blocks to its SPI flash memory involves low-level hardware operations. If invalid image formats or unexpected data streams are transmitted, the microcontroller's hardware JPEG decoder may fault, causing the screen to remain completely black (with no backlight) and stop responding to software commands.
+Official ASUS stock firmware `0109` contains several firmware bugs that prevent live video streaming: an immediate shadow reload mid-frame that tears scanlines, a 3.68 MB synchronous CPU `memcpy` that saturates the external PSRAM bus, and dynamic bitmap heap exhaustion that crashes stock wallpapers.
 
-The authors and contributors provide this software "AS IS", without warranty of any kind, express or implied. Under no circumstances shall the authors be held liable for any damages, hardware malfunctions, or issues arising from the use of this software.
+`x870e-lcd-patcher` applies the unified 3-part patch suite to official stock firmware `0109` to enable 100% clean, tear-free live video streaming while preserving all factory wallpapers and animations.
 
-### Emergency Recovery (Restoring the LCD)
-If your 5-inch LCD panel ever enters an unresponsive or black screen state and does not recover across normal reboots, it can potentially be restored to full working factory condition using the official ASUS firmware updater tool:
+```bash
+# 1. Inspect firmware (validates Sum32 checksum and patch status):
+./target/release/x870e-lcd-patcher info ALDR4-S7R7-0109.bin
 
+# 2. Apply the video streaming patch:
+./target/release/x870e-lcd-patcher patch ALDR4-S7R7-0109.bin -o ALDR4-S7R7-patched-0109.bin
+
+# 3. Compare original and patched binaries:
+./target/release/x870e-lcd-patcher diff ALDR4-S7R7-0109.bin ALDR4-S7R7-patched-0109.bin
+```
+
+---
+
+## Firmware Flasher (`x870e-lcd-flash`) & Safety Guidelines
+
+> [!CAUTION]
+> ### ⛔ DO NOT USE WINE OR PROTON TO FLASH FIRMWARE!
+> **NEVER attempt to run ASUS's Windows `AIOFanFWUpdate.exe` tool under Wine or Proton on Linux.**
+> During firmware flashing, the panel restarts and switches from normal application mode (`0b05:1c83`) to USB bootloader mode (`0b05:1c82`). Wine does not handle dynamic USB device disconnect/re-enumeration handshakes properly. Flashing under Wine will abort mid-transfer, risking leaving your panel in an unresponsive or bricked bootloader state.
+> 
+> If you wish to use the official ASUS updater, **boot natively into Windows or Windows PE**.
+
+> [!WARNING]
+> ### ⚠️ EXPERIMENTAL SOFTWARE — USE AT YOUR OWN RISK
+> `x870e-lcd-flash` is an independent, reverse-engineered Linux utility that communicates directly with the STM32H7 bootloader over USB.
+> **This tool is experimental. Flashing firmware always carries inherent risk. You use this software entirely at your own risk.**
+> The author and contributors accept **NO LIABILITY** whatsoever for bricked devices, lost data, damaged hardware, or hardware repair costs. If you do not accept this risk, do not flash your device.
+
+### Using `x870e-lcd-flash` on Linux
+
+1. **Simulate / Validate (Dry Run)**:
+   Verify image integrity and Sum32 checksum without touching hardware:
+   ```bash
+   ./target/release/x870e-lcd-flash ALDR4-S7R7-patched-0109.bin --dry-run
+   ```
+
+2. **Flash Firmware over USB**:
+   The tool automatically puts the panel into Update Mode (`0b05:1c82`), checks the SPI NOR flash ID, erases the image partition, transmits 2047 bulk chunks with hardware ACKs, verifies the Sum32 checksum, and issues `DevRst` to reboot back into application mode:
+   ```bash
+   ./target/release/x870e-lcd-flash ALDR4-S7R7-patched-0109.bin
+   ```
+
+3. **Flashing an Unresponsive Panel (Already in Bootloader Mode)**:
+   If the panel is already stuck in Update Mode (`0b05:1c82`):
+   ```bash
+   ./target/release/x870e-lcd-flash ALDR4-S7R7-0109.bin --no-reboot
+   ```
+
+---
+
+## ⚠️ Emergency Recovery (Restoring the LCD)
+
+If your 5-inch LCD panel ever enters an unresponsive or black screen state and does not recover across normal reboots, it can be restored to full working factory condition:
+
+### Method A: Using `x870e-lcd-flash` on Linux
+Flash the official unpatched stock firmware `ALDR4-S7R7-0109.bin`:
+```bash
+./target/release/x870e-lcd-flash ALDR4-S7R7-0109.bin
+```
+
+### Method B: Native Windows Recovery
 1. **Download Official ASUS LCD Firmware**:
    * Visit the official ASUS ROG Crosshair X870E Extreme support portal:  
      [ASUS ROG Support - BIOS & Firmware](https://rog.asus.com/motherboards/rog-crosshair/rog-crosshair-x870e-extreme/helpdesk_bios/)
@@ -291,7 +385,7 @@ If your 5-inch LCD panel ever enters an unresponsive or black screen state and d
      7D0F17FF087B1268EBD27A01E09D1C838FB6B2950AB6E86290079ED924A92C3A
      ```
 3. **Flashing Procedure**:
-   * Boot into a Windows environment (or Windows PE / To-Go USB drive).
+   * Boot **natively** into Windows (or a Windows PE / Windows To-Go USB drive). **DO NOT use Wine.**
    * Extract and run the ASUS update tool executable (`ASUS_MB20245InchLCD_FW0109_UpdateTool`).
    * The tool will detect the panel and cleanly rewrite the factory firmware and stock wallpaper assets into the onboard SPI flash.
 
