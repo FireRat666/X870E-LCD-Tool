@@ -129,13 +129,7 @@ fn launch_gui() -> Result<()> {
 
 /// Streams real-time hardware telemetry dashboard to the LCD panel via CLI.
 fn run_cli_dashboard(title: String, theme_name: &str, pacing_ms: u64) -> Result<()> {
-    let theme = match theme_name.to_lowercase().as_str() {
-        "cyber" => ThemeColor::CyberCyan,
-        "matrix" => ThemeColor::MatrixGreen,
-        "amber" => ThemeColor::AmberGold,
-        "purple" => ThemeColor::NeonPurple,
-        _ => ThemeColor::RogRed,
-    };
+    let theme = ThemeColor::parse(theme_name).unwrap_or(ThemeColor::RogRed);
 
     let mut hw_mon = HardwareMonitor::new();
     let snap = hw_mon.refresh();

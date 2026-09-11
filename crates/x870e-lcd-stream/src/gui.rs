@@ -10,7 +10,7 @@ use eframe::egui::{self, Color32, ComboBox, Pos2, Rect, RichText, Sense, Slider,
 use x870e_lcd_core::{HardwareMonitor, LcdDevice, DisplayMode, FRAME_RAW_SIZE, FRAME_WIDTH, FRAME_HEIGHT};
 
 use crate::media::{self, MediaConfig, Rotation, ScaleMode};
-use crate::renderer::{self, DashboardData, DashboardSection, ThemeColor};
+use crate::renderer::{self, DashboardData, DashboardSection, ThemeColor, TimezoneConfig};
 use crate::streamer::StreamerStats;
 use crate::video::VideoPlayer;
 
@@ -70,6 +70,8 @@ pub struct StreamGuiApp {
     last_preview_time: Instant,
     shared_config: Arc<Mutex<SharedStreamConfig>>,
     new_frame_available: Arc<AtomicBool>,
+    theme_custom_rgb: [u8; 3],
+    theme_hex_input: String,
     status_message: String,
 }
 
@@ -96,6 +98,8 @@ impl StreamGuiApp {
         data.net_rx_kbps = snap.net_rx_kbps;
         data.net_tx_kbps = snap.net_tx_kbps;
 
+        let default_theme_rgb = data.theme.rgb();
+        let default_theme_hex = data.theme.hex();
         let initial_buf = vec![0u8; FRAME_RAW_SIZE];
 
         let shared_config = Arc::new(Mutex::new(SharedStreamConfig {
@@ -131,6 +135,8 @@ impl StreamGuiApp {
             last_preview_time: Instant::now(),
             shared_config,
             new_frame_available: Arc::new(AtomicBool::new(false)),
+            theme_custom_rgb: default_theme_rgb,
+            theme_hex_input: default_theme_hex,
             status_message: "Ready to stream".to_string(),
         }
     }
@@ -554,22 +560,97 @@ impl eframe::App for StreamGuiApp {
                         });
 
                         ui.horizontal(|ui| {
-                            ui.label("Theme Color:");
+                            ui.label("Theme Preset:");
                             ComboBox::from_id_salt("theme_picker")
-                                .selected_text(match self.dashboard_data.theme {
-                                    ThemeColor::RogRed => "ROG Red",
-                                    ThemeColor::CyberCyan => "Cyber Cyan",
-                                    ThemeColor::MatrixGreen => "Matrix Green",
-                                    ThemeColor::AmberGold => "Amber Gold",
-                                    ThemeColor::NeonPurple => "Neon Purple",
-                                })
+                                .selected_text(self.dashboard_data.theme.label())
                                 .show_ui(ui, |ui| {
-                                    ui.selectable_value(&mut self.dashboard_data.theme, ThemeColor::RogRed, "ROG Red");
-                                    ui.selectable_value(&mut self.dashboard_data.theme, ThemeColor::CyberCyan, "Cyber Cyan");
-                                    ui.selectable_value(&mut self.dashboard_data.theme, ThemeColor::MatrixGreen, "Matrix Green");
-                                    ui.selectable_value(&mut self.dashboard_data.theme, ThemeColor::AmberGold, "Amber Gold");
-                                    ui.selectable_value(&mut self.dashboard_data.theme, ThemeColor::NeonPurple, "Neon Purple");
+                                    if ui.selectable_value(&mut self.dashboard_data.theme, ThemeColor::RogRed, "ROG Red").clicked() {
+                                        self.theme_custom_rgb = self.dashboard_data.theme.rgb();
+                                        self.theme_hex_input = self.dashboard_data.theme.hex();
+                                    }
+                                    if ui.selectable_value(&mut self.dashboard_data.theme, ThemeColor::CyberCyan, "Cyber Cyan").clicked() {
+                                        self.theme_custom_rgb = self.dashboard_data.theme.rgb();
+                                        self.theme_hex_input = self.dashboard_data.theme.hex();
+                                    }
+                                    if ui.selectable_value(&mut self.dashboard_data.theme, ThemeColor::MatrixGreen, "Matrix Green").clicked() {
+                                        self.theme_custom_rgb = self.dashboard_data.theme.rgb();
+                                        self.theme_hex_input = self.dashboard_data.theme.hex();
+                                    }
+                                    if ui.selectable_value(&mut self.dashboard_data.theme, ThemeColor::AmberGold, "Amber Gold").clicked() {
+                                        self.theme_custom_rgb = self.dashboard_data.theme.rgb();
+                                        self.theme_hex_input = self.dashboard_data.theme.hex();
+                                    }
+                                    if ui.selectable_value(&mut self.dashboard_data.theme, ThemeColor::NeonPurple, "Neon Purple").clicked() {
+                                        self.theme_custom_rgb = self.dashboard_data.theme.rgb();
+                                        self.theme_hex_input = self.dashboard_data.theme.hex();
+                                    }
                                 });
+                        });
+
+                        ui.horizontal(|ui| {
+                            ui.label("Theme Color (Hex / RGB):");
+                            if ui.color_edit_button_srgb(&mut self.theme_custom_rgb).changed() {
+                                self.dashboard_data.theme = ThemeColor::Custom(self.theme_custom_rgb);
+                                self.theme_hex_input = self.dashboard_data.theme.hex();
+                            }
+                            let hex_res = ui.add(egui::TextEdit::singleline(&mut self.theme_hex_input).desired_width(75.0));
+                            if hex_res.changed() {
+                                if let Some(parsed) = ThemeColor::parse(&self.theme_hex_input) {
+                                    self.dashboard_data.theme = parsed;
+                                    self.theme_custom_rgb = parsed.rgb();
+                                }
+                            }
+                            ui.label(RichText::new(format!("RGB({}, {}, {})", self.theme_custom_rgb[0], self.theme_custom_rgb[1], self.theme_custom_rgb[2])).small().color(Color32::GRAY));
+                        });
+
+                        ui.add_space(4.0);
+                        ui.group(|ui| {
+                            ui.label(RichText::new("Clock & Date Settings").strong());
+                            ui.horizontal(|ui| {
+                                ui.label("Timezone:");
+                                let tz_label = match self.dashboard_data.timezone {
+                                    TimezoneConfig::Local => "Local (Computer Default)".to_string(),
+                                    TimezoneConfig::Utc => "UTC (Universal Time)".to_string(),
+                                    TimezoneConfig::Custom(m) => {
+                                        let sign = if m >= 0 { '+' } else { '-' };
+                                        let abs = m.abs();
+                                        format!("UTC{}{:02}:{:02}", sign, abs / 60, abs % 60)
+                                    }
+                                };
+                                ComboBox::from_id_salt("timezone_picker")
+                                    .selected_text(tz_label)
+                                    .show_ui(ui, |ui| {
+                                        ui.selectable_value(&mut self.dashboard_data.timezone, TimezoneConfig::Local, "Local (Computer Default)");
+                                        ui.selectable_value(&mut self.dashboard_data.timezone, TimezoneConfig::Utc, "UTC (Universal Time)");
+                                        ui.separator();
+                                        ui.selectable_value(&mut self.dashboard_data.timezone, TimezoneConfig::Custom(-480), "UTC-08:00 (PST)");
+                                        ui.selectable_value(&mut self.dashboard_data.timezone, TimezoneConfig::Custom(-300), "UTC-05:00 (EST)");
+                                        ui.selectable_value(&mut self.dashboard_data.timezone, TimezoneConfig::Custom(0), "UTC+00:00 (GMT)");
+                                        ui.selectable_value(&mut self.dashboard_data.timezone, TimezoneConfig::Custom(60), "UTC+01:00 (CET)");
+                                        ui.selectable_value(&mut self.dashboard_data.timezone, TimezoneConfig::Custom(480), "UTC+08:00 (CST/SGT)");
+                                        ui.selectable_value(&mut self.dashboard_data.timezone, TimezoneConfig::Custom(540), "UTC+09:00 (JST)");
+                                        ui.selectable_value(&mut self.dashboard_data.timezone, TimezoneConfig::Custom(600), "UTC+10:00 (AEST)");
+                                        ui.selectable_value(&mut self.dashboard_data.timezone, TimezoneConfig::Custom(660), "UTC+11:00 (AEDT)");
+                                    });
+                            });
+
+                            let is_custom = matches!(self.dashboard_data.timezone, TimezoneConfig::Custom(_));
+                            let custom_offset_m = match self.dashboard_data.timezone {
+                                TimezoneConfig::Custom(m) => m,
+                                _ => 0,
+                            };
+                            ui.horizontal(|ui| {
+                                let mut hours = custom_offset_m as f32 / 60.0;
+                                ui.label("Custom UTC Offset:");
+                                if ui.add_enabled(is_custom, Slider::new(&mut hours, -12.0..=14.0).step_by(0.5).suffix(" hrs")).changed() {
+                                    self.dashboard_data.timezone = TimezoneConfig::Custom((hours * 60.0).round() as i32);
+                                }
+                                if !is_custom && ui.button("Set Custom").clicked() {
+                                    self.dashboard_data.timezone = TimezoneConfig::Custom(0);
+                                }
+                            });
+
+                            ui.checkbox(&mut self.dashboard_data.use_24h_clock, "24-Hour Format");
                         });
 
                         ui.add_space(8.0);

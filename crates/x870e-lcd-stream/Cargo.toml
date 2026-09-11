@@ -20,3 +20,4 @@ tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 sysinfo = { workspace = true }
 ctrlc = { workspace = true }
+chrono = { workspace = true }

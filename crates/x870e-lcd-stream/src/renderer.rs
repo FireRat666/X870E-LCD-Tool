@@ -1,6 +1,5 @@
 //! 720x1280 BGRA8888 software canvas renderer for dashboard, patterns, and media frames.
 
-use std::time::SystemTime;
 use image::{imageops::FilterType, DynamicImage, GenericImageView};
 use crate::font::{draw_text_bgra, FONT_WIDTH};
 
@@ -16,6 +15,7 @@ pub enum ThemeColor {
     MatrixGreen,
     AmberGold,
     NeonPurple,
+    Custom([u8; 3]),
 }
 
 impl ThemeColor {
@@ -27,6 +27,73 @@ impl ThemeColor {
             Self::MatrixGreen => [0x33, 0xee, 0x33, 0xff],  // Neon Green
             Self::AmberGold => [0x00, 0xb0, 0xff, 0xff],    // Amber Gold
             Self::NeonPurple => [0xee, 0x33, 0xaa, 0xff],   // Purple
+            Self::Custom([r, g, b]) => [*b, *g, *r, 0xff],  // Custom RGB -> BGRA
+        }
+    }
+
+    /// Returns the primary accent color as [R, G, B].
+    pub fn rgb(&self) -> [u8; 3] {
+        match self {
+            Self::RogRed => [0xee, 0x22, 0x22],
+            Self::CyberCyan => [0x00, 0xee, 0xee],
+            Self::MatrixGreen => [0x33, 0xee, 0x33],
+            Self::AmberGold => [0xff, 0xb0, 0x00],
+            Self::NeonPurple => [0xaa, 0x33, 0xee],
+            Self::Custom(rgb) => *rgb,
+        }
+    }
+
+    /// Returns the hex code string for this theme color, e.g. "#EE2222".
+    pub fn hex(&self) -> String {
+        let [r, g, b] = self.rgb();
+        format!("#{:02X}{:02X}{:02X}", r, g, b)
+    }
+
+    /// Returns the human-readable display label for this theme color.
+    pub fn label(&self) -> String {
+        match self {
+            Self::RogRed => "ROG Red".to_string(),
+            Self::CyberCyan => "Cyber Cyan".to_string(),
+            Self::MatrixGreen => "Matrix Green".to_string(),
+            Self::AmberGold => "Amber Gold".to_string(),
+            Self::NeonPurple => "Neon Purple".to_string(),
+            Self::Custom(rgb) => format!("Custom (#{r:02X}{g:02X}{b:02X})", r = rgb[0], g = rgb[1], b = rgb[2]),
+        }
+    }
+
+    /// Parses a theme color from a preset name, hex string, or RGB triplet.
+    pub fn parse(s: &str) -> Option<Self> {
+        let s = s.trim();
+        match s.to_lowercase().as_str() {
+            "red" | "rog" | "rogred" => Some(Self::RogRed),
+            "cyan" | "cyber" | "cybercyan" => Some(Self::CyberCyan),
+            "green" | "matrix" | "matrixgreen" => Some(Self::MatrixGreen),
+            "amber" | "gold" | "ambergold" => Some(Self::AmberGold),
+            "purple" | "neon" | "neonpurple" => Some(Self::NeonPurple),
+            _ => {
+                let hex = s.strip_prefix('#').unwrap_or(s);
+                if hex.len() == 6 {
+                    if let (Ok(r), Ok(g), Ok(b)) = (
+                        u8::from_str_radix(&hex[0..2], 16),
+                        u8::from_str_radix(&hex[2..4], 16),
+                        u8::from_str_radix(&hex[4..6], 16),
+                    ) {
+                        return Some(Self::Custom([r, g, b]));
+                    }
+                }
+                let rgb_str = s.strip_prefix("rgb(").and_then(|t| t.strip_suffix(')')).unwrap_or(s);
+                let parts: Vec<&str> = rgb_str.split(',').map(|p| p.trim()).collect();
+                if parts.len() == 3 {
+                    if let (Ok(r), Ok(g), Ok(b)) = (
+                        parts[0].parse::<u8>(),
+                        parts[1].parse::<u8>(),
+                        parts[2].parse::<u8>(),
+                    ) {
+                        return Some(Self::Custom([r, g, b]));
+                    }
+                }
+                None
+            }
         }
     }
 
@@ -38,6 +105,50 @@ impl ThemeColor {
     /// Returns the card surface color as [B, G, R, A].
     pub fn card_bgra(&self) -> [u8; 4] {
         [0x24, 0x20, 0x20, 0xff] // Card background
+    }
+}
+
+/// Timezone configuration for the dashboard clock display.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TimezoneConfig {
+    /// Local time according to the operating system's configured timezone.
+    #[default]
+    Local,
+    /// Coordinated Universal Time (UTC).
+    Utc,
+    /// Custom fixed UTC offset in minutes (e.g. +600 for AEST UTC+10).
+    Custom(i32),
+}
+
+impl TimezoneConfig {
+    /// Returns the formatted time and date strings according to the configured timezone.
+    pub fn now_strings(&self, use_24h: bool) -> (String, String) {
+        match self {
+            Self::Local => {
+                let local = chrono::Local::now();
+                let time_fmt = if use_24h { "%H:%M:%S" } else { "%I:%M:%S %p" };
+                (local.format(time_fmt).to_string(), local.format("%A, %b %d, %Y").to_string())
+            }
+            Self::Utc => {
+                let utc = chrono::Utc::now();
+                let time_fmt = if use_24h { "%H:%M:%S UTC" } else { "%I:%M:%S %p UTC" };
+                (utc.format(time_fmt).to_string(), utc.format("%A, %b %d, %Y").to_string())
+            }
+            Self::Custom(offset_minutes) => {
+                let secs = offset_minutes * 60;
+                if let Some(offset) = chrono::FixedOffset::east_opt(secs) {
+                    let dt = chrono::Utc::now().with_timezone(&offset);
+                    let sign = if *offset_minutes >= 0 { '+' } else { '-' };
+                    let abs_m = offset_minutes.abs();
+                    let tz_str = format!("UTC{}{:02}:{:02}", sign, abs_m / 60, abs_m % 60);
+                    let time_fmt = if use_24h { "%H:%M:%S" } else { "%I:%M:%S %p" };
+                    (format!("{} {}", dt.format(time_fmt), tz_str), dt.format("%A, %b %d, %Y").to_string())
+                } else {
+                    let utc = chrono::Utc::now();
+                    (utc.format("%H:%M:%S UTC").to_string(), utc.format("%A, %b %d, %Y").to_string())
+                }
+            }
+        }
     }
 }
 
@@ -100,6 +211,9 @@ pub struct DashboardData {
 
     pub net_rx_kbps: f32,
     pub net_tx_kbps: f32,
+
+    pub timezone: TimezoneConfig,
+    pub use_24h_clock: bool,
 }
 
 impl Default for DashboardData {
@@ -112,6 +226,8 @@ impl Default for DashboardData {
             pacing_ms: 250,
             show_header: true,
             show_footer: true,
+            timezone: TimezoneConfig::Local,
+            use_24h_clock: true,
             slot1: DashboardSection::Clock,
             slot2: DashboardSection::Cpu,
             slot3: DashboardSection::Gpu,
@@ -251,16 +367,12 @@ pub fn render_dashboard(data: &DashboardData, buffer: &mut [u8]) {
                 fill_rect_bgra(buffer, card_x, current_y, card_w, h, card);
                 draw_border_bgra(buffer, card_x, current_y, card_w, h, 2, [0x40, 0x38, 0x38, 0xff]);
 
-                let now = SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs();
-                let hours = (now / 3600) % 24;
-                let mins = (now / 60) % 60;
-                let secs = now % 60;
-                let time_str = format!("{:02}:{:02}:{:02} UTC", hours, mins, secs);
-                draw_text_bgra(buffer, WIDTH, HEIGHT, card_x + 24, current_y + 30, &time_str, white, 4);
-                draw_text_bgra(buffer, WIDTH, HEIGHT, card_x + 24, current_y + 95, "LIVE SYSTEM TELEMETRY", gray, 2);
+                let (time_str, date_str) = data.timezone.now_strings(data.use_24h_clock);
+                let time_scale = if time_str.len() > 14 { 3 } else { 4 };
+                let time_y = if time_scale == 3 { current_y + 32 } else { current_y + 26 };
+
+                draw_text_bgra(buffer, WIDTH, HEIGHT, card_x + 24, time_y, &time_str, white, time_scale);
+                draw_text_bgra(buffer, WIDTH, HEIGHT, card_x + 24, current_y + 94, &date_str, accent, 2);
 
                 current_y += h + 20;
             }
@@ -523,5 +635,51 @@ pub fn image_to_bgra(img: &DynamicImage, buffer: &mut [u8], crop_fill: bool) {
                 buffer[off + 3] = px[3]; // A
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_theme_color_presets() {
+        assert_eq!(ThemeColor::parse("red"), Some(ThemeColor::RogRed));
+        assert_eq!(ThemeColor::parse("cyan"), Some(ThemeColor::CyberCyan));
+        assert_eq!(ThemeColor::parse("green"), Some(ThemeColor::MatrixGreen));
+        assert_eq!(ThemeColor::parse("amber"), Some(ThemeColor::AmberGold));
+        assert_eq!(ThemeColor::parse("purple"), Some(ThemeColor::NeonPurple));
+    }
+
+    #[test]
+    fn test_theme_color_hex_and_rgb_parsing() {
+        assert_eq!(ThemeColor::parse("#FF3C3C"), Some(ThemeColor::Custom([255, 60, 60])));
+        assert_eq!(ThemeColor::parse("00FF00"), Some(ThemeColor::Custom([0, 255, 0])));
+        assert_eq!(ThemeColor::parse("255, 128, 64"), Some(ThemeColor::Custom([255, 128, 64])));
+        assert_eq!(ThemeColor::parse("rgb(10, 20, 30)"), Some(ThemeColor::Custom([10, 20, 30])));
+        assert_eq!(ThemeColor::parse("invalid"), None);
+    }
+
+    #[test]
+    fn test_theme_color_properties() {
+        let custom = ThemeColor::Custom([255, 128, 64]);
+        assert_eq!(custom.rgb(), [255, 128, 64]);
+        assert_eq!(custom.hex(), "#FF8040");
+        assert_eq!(custom.accent_bgra(), [64, 128, 255, 255]);
+    }
+
+    #[test]
+    fn test_timezone_config_strings() {
+        let (utc_time, utc_date) = TimezoneConfig::Utc.now_strings(true);
+        assert!(utc_time.contains("UTC"));
+        assert!(!utc_date.is_empty());
+
+        let (local_time, local_date) = TimezoneConfig::Local.now_strings(false);
+        assert!(!local_time.is_empty());
+        assert!(!local_date.is_empty());
+
+        let (custom_time, custom_date) = TimezoneConfig::Custom(600).now_strings(true);
+        assert!(custom_time.contains("UTC+10:00"));
+        assert!(!custom_date.is_empty());
     }
 }
