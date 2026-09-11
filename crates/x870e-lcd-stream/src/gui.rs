@@ -1,7 +1,7 @@
 //! Interactive desktop GUI for custom live streaming to the ASUS ROG X870E LCD.
 
 use std::path::PathBuf;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -28,6 +28,18 @@ pub enum MediaKind {
     Video,
 }
 
+/// Thread-safe configuration synchronized between the GUI and background streaming worker.
+#[derive(Clone)]
+struct SharedStreamConfig {
+    mode: StreamMode,
+    selected_pattern: String,
+    media_kind: MediaKind,
+    image_data: Option<Arc<image::DynamicImage>>,
+    media_config: MediaConfig,
+    dashboard_data: DashboardData,
+    pacing_ms: u64,
+}
+
 pub struct StreamGuiApp {
     mode: StreamMode,
     dashboard_data: DashboardData,
@@ -36,7 +48,7 @@ pub struct StreamGuiApp {
     // Media streaming state
     media_path: Option<PathBuf>,
     media_kind: MediaKind,
-    image_data: Option<image::DynamicImage>,
+    image_data: Option<Arc<image::DynamicImage>>,
     video_player: Arc<Mutex<VideoPlayer>>,
     media_config: MediaConfig,
     source_thumb_tex: Option<egui::TextureHandle>,
@@ -55,6 +67,9 @@ pub struct StreamGuiApp {
     preview_texture: Option<egui::TextureHandle>,
     hw_mon: HardwareMonitor,
     last_hw_update: Instant,
+    last_preview_time: Instant,
+    shared_config: Arc<Mutex<SharedStreamConfig>>,
+    new_frame_available: Arc<AtomicBool>,
     status_message: String,
 }
 
@@ -83,6 +98,16 @@ impl StreamGuiApp {
 
         let initial_buf = vec![0u8; FRAME_RAW_SIZE];
 
+        let shared_config = Arc::new(Mutex::new(SharedStreamConfig {
+            mode: StreamMode::Dashboard,
+            selected_pattern: "vertical-split".to_string(),
+            media_kind: MediaKind::None,
+            image_data: None,
+            media_config: MediaConfig::default(),
+            dashboard_data: data.clone(),
+            pacing_ms: 250,
+        }));
+
         Self {
             mode: StreamMode::Dashboard,
             dashboard_data: data,
@@ -103,6 +128,9 @@ impl StreamGuiApp {
             preview_texture: None,
             hw_mon,
             last_hw_update: Instant::now(),
+            last_preview_time: Instant::now(),
+            shared_config,
+            new_frame_available: Arc::new(AtomicBool::new(false)),
             status_message: "Ready to stream".to_string(),
         }
     }
@@ -196,6 +224,7 @@ impl StreamGuiApp {
             self.source_thumb_tex = None;
             self.media_path = Some(path);
             self.status_message = "Video loaded successfully".to_string();
+            self.last_preview_time = Instant::now().checked_sub(Duration::from_millis(self.pacing_ms)).unwrap_or_else(Instant::now);
         } else {
             // Stop any playing video
             if let Ok(mut player) = self.video_player.lock() {
@@ -212,10 +241,11 @@ impl StreamGuiApp {
                         &rgba,
                     );
                     self.source_thumb_tex = Some(ctx.load_texture("source_thumb", color_img, egui::TextureOptions::LINEAR));
-                    self.image_data = Some(img);
+                    self.image_data = Some(Arc::new(img));
                     self.media_kind = MediaKind::Image;
                     self.media_path = Some(path);
                     self.status_message = "Image loaded successfully".to_string();
+                    self.last_preview_time = Instant::now().checked_sub(Duration::from_millis(33)).unwrap_or_else(Instant::now);
                 }
                 Err(e) => {
                     self.status_message = format!("Image Load Error: {}", e);
@@ -230,6 +260,28 @@ impl StreamGuiApp {
             if let Ok(mut player) = self.video_player.lock() {
                 let _ = player.set_config(self.media_config.clone());
             }
+        }
+    }
+
+    /// Converts a BGRA8888 buffer to RGBA8888 and updates the egui preview texture.
+    fn update_preview_texture(&mut self, ctx: &egui::Context, bgra: &[u8]) {
+        let mut rgba = vec![0u8; FRAME_RAW_SIZE];
+        for i in (0..FRAME_RAW_SIZE).step_by(4) {
+            rgba[i] = bgra[i + 2];     // R
+            rgba[i + 1] = bgra[i + 1]; // G
+            rgba[i + 2] = bgra[i];     // B
+            rgba[i + 3] = 255;          // A
+        }
+
+        let color_img = egui::ColorImage::from_rgba_unmultiplied(
+            [FRAME_WIDTH as usize, FRAME_HEIGHT as usize],
+            &rgba,
+        );
+
+        if let Some(tex) = &mut self.preview_texture {
+            tex.set(color_img, egui::TextureOptions::LINEAR);
+        } else {
+            self.preview_texture = Some(ctx.load_texture("lcd_preview", color_img, egui::TextureOptions::LINEAR));
         }
     }
 
@@ -257,29 +309,93 @@ impl StreamGuiApp {
         self.is_streaming = true;
         self.status_message = "Live Streaming Active (Starting...)".to_string();
 
+        if let Ok(mut cfg) = self.shared_config.lock() {
+            cfg.mode = self.mode;
+            cfg.selected_pattern = self.selected_pattern.clone();
+            cfg.media_kind = self.media_kind;
+            cfg.image_data = self.image_data.clone();
+            cfg.media_config = self.media_config.clone();
+            cfg.dashboard_data = self.dashboard_data.clone();
+            cfg.pacing_ms = self.pacing_ms;
+        }
+
+        self.new_frame_available.store(false, Ordering::SeqCst);
+
         let stats = self.stats.clone();
         let frame_shared = self.active_frame.clone();
-        let pacing = self.pacing_ms;
+        let shared_config = self.shared_config.clone();
+        let video_player = self.video_player.clone();
+        let new_frame_available = self.new_frame_available.clone();
 
         let handle = thread::spawn(move || {
             let mut local_buf = vec![0u8; FRAME_RAW_SIZE];
+            let mut frame_count: u32 = 0;
+
             while stats.running.load(Ordering::SeqCst) {
                 let start = Instant::now();
 
-                // Copy latest frame
-                if let Ok(guard) = frame_shared.lock() {
-                    local_buf.copy_from_slice(&guard);
+                // 1. Snapshot current streaming configuration
+                let (mode, media_kind, img_opt, media_cfg, pattern, d_data, pacing) = {
+                    if let Ok(cfg) = shared_config.lock() {
+                        (
+                            cfg.mode,
+                            cfg.media_kind,
+                            cfg.image_data.clone(),
+                            cfg.media_config.clone(),
+                            cfg.selected_pattern.clone(),
+                            cfg.dashboard_data.clone(),
+                            cfg.pacing_ms,
+                        )
+                    } else {
+                        break;
+                    }
+                };
+
+                // 2. Generate frame for LCD screen
+                match mode {
+                    StreamMode::Dashboard => {
+                        renderer::render_dashboard(&d_data, &mut local_buf);
+                    }
+                    StreamMode::Pattern => {
+                        renderer::render_pattern(&pattern, frame_count, &mut local_buf);
+                    }
+                    StreamMode::Media => {
+                        match media_kind {
+                            MediaKind::Image => {
+                                if let Some(ref img) = img_opt {
+                                    media::process_image_to_bgra(img, &media_cfg, &mut local_buf);
+                                } else {
+                                    renderer::fill_rect_bgra(&mut local_buf, 0, 0, FRAME_WIDTH as usize, FRAME_HEIGHT as usize, [0, 0, 0, 0xff]);
+                                }
+                            }
+                            MediaKind::Video => {
+                                if let Ok(mut player) = video_player.lock() {
+                                    let _ = player.read_frame(&mut local_buf);
+                                }
+                            }
+                            MediaKind::None => {
+                                renderer::fill_rect_bgra(&mut local_buf, 0, 0, FRAME_WIDTH as usize, FRAME_HEIGHT as usize, [0, 0, 0, 0xff]);
+                            }
+                        }
+                    }
                 }
 
-                // Send frame over USB
+                // 3. Send frame over USB bulk transfer
                 if let Err(e) = device.send_stream_frame(&local_buf) {
                     tracing::error!("Stream error: {}", e);
                     break;
                 }
 
-                stats.frames_sent.fetch_add(1, Ordering::Relaxed);
+                // 4. Update preview buffer with the exact frame that was sent to the screen
+                if let Ok(mut guard) = frame_shared.lock() {
+                    guard.copy_from_slice(&local_buf);
+                }
+                new_frame_available.store(true, Ordering::Release);
 
-                // Inter-frame pacing delay
+                stats.frames_sent.fetch_add(1, Ordering::Relaxed);
+                frame_count = frame_count.wrapping_add(1);
+
+                // 5. Inter-frame pacing delay
                 if pacing > 0 {
                     thread::sleep(Duration::from_millis(pacing));
                 }
@@ -323,7 +439,7 @@ impl eframe::App for StreamGuiApp {
     /// Renders the GUI interface and processes egui events for each frame.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Dynamic repaint based on media/pacing
-        let repaint_ms = if self.pacing_ms > 0 { self.pacing_ms.min(250) } else { 100 };
+        let repaint_ms = if self.pacing_ms > 0 { self.pacing_ms.min(100) } else { 50 };
         ctx.request_repaint_after(Duration::from_millis(repaint_ms));
 
         if self.is_streaming {
@@ -337,37 +453,52 @@ impl eframe::App for StreamGuiApp {
             } else {
                 self.status_message = "Live Streaming Active (Starting...)".to_string();
             }
-        }
 
-        self.dashboard_data.fps = self.current_fps;
-        self.dashboard_data.pacing_ms = self.pacing_ms;
+            self.update_telemetry();
+            self.dashboard_data.fps = self.current_fps;
+            self.dashboard_data.pacing_ms = self.pacing_ms;
 
-        // Generate current frame into active buffer
-        let mut local_buf = vec![0u8; FRAME_RAW_SIZE];
-        self.generate_current_frame(&mut local_buf);
+            // Synchronize current GUI state to the streaming worker
+            if let Ok(mut cfg) = self.shared_config.lock() {
+                cfg.mode = self.mode;
+                cfg.selected_pattern = self.selected_pattern.clone();
+                cfg.media_kind = self.media_kind;
+                cfg.image_data = self.image_data.clone();
+                cfg.media_config = self.media_config.clone();
+                cfg.dashboard_data = self.dashboard_data.clone();
+                cfg.pacing_ms = self.pacing_ms;
+            }
 
-        if let Ok(mut buf) = self.active_frame.lock() {
-            buf.copy_from_slice(&local_buf);
-        }
-
-        // Convert BGRA to RGBA for egui central preview
-        let mut rgba = vec![0u8; FRAME_RAW_SIZE];
-        for i in (0..FRAME_RAW_SIZE).step_by(4) {
-            rgba[i] = local_buf[i + 2];     // R
-            rgba[i + 1] = local_buf[i + 1]; // G
-            rgba[i + 2] = local_buf[i];     // B
-            rgba[i + 3] = 255;              // A
-        }
-
-        let color_img = egui::ColorImage::from_rgba_unmultiplied(
-            [FRAME_WIDTH as usize, FRAME_HEIGHT as usize],
-            &rgba,
-        );
-
-        if let Some(tex) = &mut self.preview_texture {
-            tex.set(color_img, egui::TextureOptions::LINEAR);
+            // Lockstep preview update: only update preview texture when worker transmits a new frame
+            if self.new_frame_available.swap(false, Ordering::AcqRel) {
+                let mut local_buf = vec![0u8; FRAME_RAW_SIZE];
+                let has_frame = if let Ok(guard) = self.active_frame.lock() {
+                    local_buf.copy_from_slice(&guard);
+                    true
+                } else {
+                    false
+                };
+                if has_frame {
+                    self.update_preview_texture(ctx, &local_buf);
+                }
+            }
         } else {
-            self.preview_texture = Some(ctx.load_texture("lcd_preview", color_img, egui::TextureOptions::LINEAR));
+            self.update_telemetry();
+            self.dashboard_data.fps = 0.0;
+            self.dashboard_data.pacing_ms = self.pacing_ms;
+
+            // When idle/previewing: throttle frame generation strictly according to pacing_ms
+            let should_advance = self.last_preview_time.elapsed() >= Duration::from_millis(self.pacing_ms.max(16));
+
+            if should_advance {
+                let mut local_buf = vec![0u8; FRAME_RAW_SIZE];
+                self.generate_current_frame(&mut local_buf);
+                if let Ok(mut guard) = self.active_frame.lock() {
+                    guard.copy_from_slice(&local_buf);
+                }
+                self.update_preview_texture(ctx, &local_buf);
+                self.last_preview_time = Instant::now();
+            }
         }
 
         // Top Control Panel
@@ -662,6 +793,11 @@ impl eframe::App for StreamGuiApp {
 
                         if config_changed {
                             self.sync_video_config();
+                            if !self.is_streaming && self.media_kind == MediaKind::Image {
+                                let mut local_buf = vec![0u8; FRAME_RAW_SIZE];
+                                self.generate_current_frame(&mut local_buf);
+                                self.update_preview_texture(ctx, &local_buf);
+                            }
                         }
                     }
 

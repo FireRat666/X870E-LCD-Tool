@@ -66,6 +66,8 @@ impl DashboardSection {
     }
 }
 
+/// Layout configuration and system telemetry payload rendered to the dashboard canvas.
+#[derive(Debug, Clone)]
 pub struct DashboardData {
     pub title: String,
     pub theme: ThemeColor,
