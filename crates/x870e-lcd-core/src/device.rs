@@ -264,4 +264,51 @@ impl LcdDevice {
         info!("JPEG upload completed successfully and activated on custom slot {}", target_slot);
         Ok(())
     }
+
+    /// Switches the LCD panel to live uncompressed video frame streaming mode (Mode 0x20)
+    pub fn enter_frame_stream(&self) -> Result<(), LcdError> {
+        info!("Switching LCD panel to Live Frame Stream mode (0x20)...");
+        self.set_mode(DisplayMode::FrameStream)?;
+        sleep(Duration::from_millis(100));
+        self.drain_hid();
+        Ok(())
+    }
+
+    /// Sends a single raw 720x1280 BGRA8888 uncompressed video frame (3,686,400 bytes)
+    /// to the LCD panel over USB Bulk Endpoint 2 with automatic safety pacing.
+    pub fn send_stream_frame(&self, bgra_data: &[u8]) -> Result<(), LcdError> {
+        if bgra_data.len() != protocol::FRAME_RAW_SIZE {
+            return Err(LcdError::BulkTransferFailed {
+                transferred: bgra_data.len(),
+                expected: protocol::FRAME_RAW_SIZE,
+            });
+        }
+
+        self.drain_hid();
+
+        // 1. Announce frame size to LCD firmware
+        let announce = protocol::packet_announce_stream_frame(protocol::FRAME_RAW_SIZE as u32);
+        self.send_hid_packet(&announce)?;
+
+        // 2. Wait for ACK from controller (0xec 0x7f 0x00 ...)
+        let _ = self.wait_for_report(Duration::from_millis(500), |buf| {
+            buf.len() >= 3 && buf[0] == 0xec && buf[1] == 0x7f && buf[2] == 0x00
+        });
+
+        // 3. Write raw 3.68 MB frame data via USB Bulk Endpoint 2 OUT
+        let transferred = self.usb_handle.write_bulk(
+            BULK_EP_OUT,
+            bgra_data,
+            Duration::from_secs(2),
+        )?;
+
+        if transferred != bgra_data.len() {
+            return Err(LcdError::BulkTransferFailed {
+                transferred,
+                expected: bgra_data.len(),
+            });
+        }
+
+        Ok(())
+    }
 }

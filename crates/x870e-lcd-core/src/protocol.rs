@@ -52,13 +52,29 @@ pub enum DisplayMode {
     Animation(u8),
     /// Real-time hardware telemetry dashboard
     HardwareMonitor,
+    /// Live high-speed uncompressed frame streaming (720x1280 BGRA8888, 3.68MB)
+    FrameStream,
 }
+
+pub const FRAME_WIDTH: u32 = PANEL_WIDTH;
+pub const FRAME_HEIGHT: u32 = PANEL_HEIGHT;
+pub const FRAME_BYTES_PER_PIXEL: usize = 4;
+pub const FRAME_RAW_SIZE: usize = (FRAME_WIDTH * FRAME_HEIGHT) as usize * FRAME_BYTES_PER_PIXEL; // 3,686,400 bytes
 
 /// Helper to create a zeroed 65-byte HID packet with the 0xEC report ID
 #[inline]
 pub fn new_packet() -> [u8; PACKET_LEN] {
     let mut pkt = [0u8; PACKET_LEN];
     pkt[0] = REPORT_ID;
+    pkt
+}
+
+/// Packet for announcing an incoming live stream frame (Cmd 0x7F, Subcmd 0x03)
+pub fn packet_announce_stream_frame(len: u32) -> [u8; PACKET_LEN] {
+    let mut pkt = new_packet();
+    pkt[1] = 0x7f;
+    pkt[2] = 0x03;
+    pkt[3..7].copy_from_slice(&len.to_le_bytes());
     pkt
 }
 
@@ -87,6 +103,9 @@ pub fn packet_set_mode(mode: DisplayMode) -> [u8; PACKET_LEN] {
         }
         DisplayMode::HardwareMonitor => {
             pkt[2] = 0x21;
+        }
+        DisplayMode::FrameStream => {
+            pkt[2] = 0x20;
         }
     }
     pkt

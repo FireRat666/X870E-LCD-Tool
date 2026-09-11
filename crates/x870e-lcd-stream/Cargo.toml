@@ -1,0 +1,21 @@
+[package]
+name = "x870e-lcd-stream"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "x870e-lcd-stream"
+path = "src/main.rs"
+
+[dependencies]
+x870e-lcd-core = { path = "../x870e-lcd-core" }
+clap = { workspace = true }
+eframe = { workspace = true }
+rfd = { workspace = true }
+image = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+sysinfo = { workspace = true }

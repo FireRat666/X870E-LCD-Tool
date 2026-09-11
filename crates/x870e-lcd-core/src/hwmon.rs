@@ -14,9 +14,13 @@ pub struct TelemetrySnapshot {
     pub gpu_name: String,
     pub gpu_temp_c: Option<f32>,
     pub gpu_usage_pct: Option<f32>,
+    pub gpu_mem_used_gb: Option<f32>,
+    pub gpu_mem_total_gb: Option<f32>,
     pub ram_used_gb: f32,
     pub ram_total_gb: f32,
     pub ram_usage_pct: f32,
+    pub net_rx_kbps: f32,
+    pub net_tx_kbps: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -102,8 +106,13 @@ impl SensorMetric {
     }
 }
 
+use std::time::Instant;
+
 pub struct HardwareMonitor {
     sys: System,
+    last_net_time: Instant,
+    last_rx_bytes: u64,
+    last_tx_bytes: u64,
 }
 
 impl HardwareMonitor {
@@ -114,7 +123,13 @@ impl HardwareMonitor {
                 .with_memory(MemoryRefreshKind::everything()),
         );
         sys.refresh_all();
-        Self { sys }
+        let (rx, tx) = read_net_bytes();
+        Self {
+            sys,
+            last_net_time: Instant::now(),
+            last_rx_bytes: rx,
+            last_tx_bytes: tx,
+        }
     }
 
     pub fn refresh(&mut self) -> TelemetrySnapshot {
@@ -132,11 +147,23 @@ impl HardwareMonitor {
         let cpu_usage_pct = self.sys.global_cpu_usage();
         let cpu_temp_c = read_cpu_temp();
 
-        let (gpu_name, gpu_temp_c, gpu_usage_pct) = read_gpu_info();
+        let (gpu_name, gpu_temp_c, gpu_usage_pct, gpu_mem_used_gb, gpu_mem_total_gb) = read_gpu_info();
 
         let ram_total = self.sys.total_memory() as f32 / (1024.0 * 1024.0 * 1024.0);
         let ram_used = self.sys.used_memory() as f32 / (1024.0 * 1024.0 * 1024.0);
         let ram_usage_pct = if ram_total > 0.0 { (ram_used / ram_total) * 100.0 } else { 0.0 };
+
+        // Calculate network transfer rates (KB/s)
+        let (current_rx, current_tx) = read_net_bytes();
+        let elapsed_secs = self.last_net_time.elapsed().as_secs_f32().max(0.1);
+        let rx_diff = current_rx.saturating_sub(self.last_rx_bytes);
+        let tx_diff = current_tx.saturating_sub(self.last_tx_bytes);
+        let net_rx_kbps = (rx_diff as f32 / elapsed_secs) / 1024.0;
+        let net_tx_kbps = (tx_diff as f32 / elapsed_secs) / 1024.0;
+
+        self.last_rx_bytes = current_rx;
+        self.last_tx_bytes = current_tx;
+        self.last_net_time = Instant::now();
 
         TelemetrySnapshot {
             cpu_name,
@@ -146,11 +173,43 @@ impl HardwareMonitor {
             gpu_name,
             gpu_temp_c,
             gpu_usage_pct,
+            gpu_mem_used_gb,
+            gpu_mem_total_gb,
             ram_used_gb: ram_used,
             ram_total_gb: ram_total,
             ram_usage_pct,
+            net_rx_kbps,
+            net_tx_kbps,
         }
     }
+}
+
+/// Reads non-loopback network bytes from /proc/net/dev
+fn read_net_bytes() -> (u64, u64) {
+    if let Ok(content) = fs::read_to_string("/proc/net/dev") {
+        let mut total_rx = 0u64;
+        let mut total_tx = 0u64;
+        for line in content.lines().skip(2) {
+            let mut parts = line.split_whitespace();
+            if let Some(iface) = parts.next() {
+                if iface.starts_with("lo:") {
+                    continue;
+                }
+                if let Some(rx_str) = parts.next() {
+                    if let Ok(rx) = rx_str.parse::<u64>() {
+                        total_rx = total_rx.saturating_add(rx);
+                    }
+                }
+                if let Some(tx_str) = parts.nth(7) {
+                    if let Ok(tx) = tx_str.parse::<u64>() {
+                        total_tx = total_tx.saturating_add(tx);
+                    }
+                }
+            }
+        }
+        return (total_rx, total_tx);
+    }
+    (0, 0)
 }
 
 /// Reads AMD CPU temperature from k10temp or zenpower in /sys/class/hwmon
@@ -179,19 +238,21 @@ fn read_cpu_temp() -> Option<f32> {
 }
 
 /// Reads GPU info (tries nvidia-smi first, falls back to amdgpu hwmon)
-fn read_gpu_info() -> (String, Option<f32>, Option<f32>) {
+fn read_gpu_info() -> (String, Option<f32>, Option<f32>, Option<f32>, Option<f32>) {
     if let Ok(output) = Command::new("nvidia-smi")
-        .args(["--query-gpu=name,temperature.gpu,utilization.gpu", "--format=csv,noheader,nounits"])
+        .args(["--query-gpu=name,temperature.gpu,utilization.gpu,memory.used,memory.total", "--format=csv,noheader,nounits"])
         .output()
     {
         if output.status.success() {
             let text = String::from_utf8_lossy(&output.stdout);
             let parts: Vec<&str> = text.trim().split(',').map(|s| s.trim()).collect();
-            if parts.len() >= 3 {
-                let name = parts[0].replace("NVIDIA GeForce ", "RTX ");
+            if parts.len() >= 5 {
+                let name = parts[0].replace("NVIDIA GeForce ", "RTX ").replace("NVIDIA ", "");
                 let temp = parts[1].parse::<f32>().ok();
                 let util = parts[2].parse::<f32>().ok();
-                return (name, temp, util);
+                let vram_used = parts[3].parse::<f32>().ok().map(|mb| mb / 1024.0);
+                let vram_total = parts[4].parse::<f32>().ok().map(|mb| mb / 1024.0);
+                return (name, temp, util, vram_used, vram_total);
             }
         }
     }
@@ -207,11 +268,11 @@ fn read_gpu_info() -> (String, Option<f32>, Option<f32>) {
                         .ok()
                         .and_then(|s| s.trim().parse::<f32>().ok())
                         .map(|m| m / 1000.0);
-                    return ("Radeon GPU".to_string(), temp, None);
+                    return ("Radeon GPU".to_string(), temp, None, None, None);
                 }
             }
         }
     }
 
-    ("GPU".to_string(), None, None)
+    ("GPU".to_string(), None, None, None, None)
 }
