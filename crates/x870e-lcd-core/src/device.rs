@@ -7,7 +7,7 @@ use tracing::{debug, info};
 
 use crate::protocol::{
     self, upload, DisplayMode, HwLayout, LcdModel, ASUS_VENDOR_ID, BULK_CHUNK_SIZE, BULK_EP_OUT,
-    LCD_PRODUCT_ID, PACKET_LEN,
+    LCD_PRODUCT_ID, PACKET_LEN, SUPPORTED_PRODUCT_IDS,
 };
 
 #[derive(Error, Debug)]
@@ -56,7 +56,7 @@ impl LcdDevice {
 
         let (hid_device, model) = match matched_hid {
             Some((info, model)) => (info.open_device(&hid_api)?, model),
-            None => (hid_api.open(ASUS_VENDOR_ID, LCD_PRODUCT_ID)?, LcdModel::Extreme),
+            None => open_fallback_hid(&hid_api)?,
         };
 
         let target_pid = model.product_id();
@@ -324,4 +324,19 @@ fn open_bulk_handle(target_pid: u16) -> Result<rusb::DeviceHandle<rusb::GlobalCo
         }
     }
     Err(LcdError::NotFound(ASUS_VENDOR_ID, target_pid))
+}
+
+/// Attempts to open any supported LCD device by product ID as a fallback when device enumeration misses it.
+fn open_fallback_hid(hid_api: &hidapi::HidApi) -> Result<(hidapi::HidDevice, LcdModel), LcdError> {
+    let mut last_err = None;
+    for &pid in SUPPORTED_PRODUCT_IDS {
+        match hid_api.open(ASUS_VENDOR_ID, pid) {
+            Ok(dev) => {
+                let model = LcdModel::from_product_id(pid).unwrap_or(LcdModel::Extreme);
+                return Ok((dev, model));
+            }
+            Err(e) => last_err = Some(e),
+        }
+    }
+    Err(last_err.map(LcdError::Hid).unwrap_or(LcdError::NotFound(ASUS_VENDOR_ID, LCD_PRODUCT_ID)))
 }

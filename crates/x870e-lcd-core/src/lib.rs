@@ -1,4 +1,4 @@
-//! Core library for ASUS ROG Crosshair X870E Extreme 5-inch Motherboard LCD Panel.
+//! Core library for ASUS ROG Crosshair X870E Motherboard 5-inch LCD Panels.
 
 pub mod protocol;
 pub mod device;

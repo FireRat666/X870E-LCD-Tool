@@ -15,7 +15,7 @@ use x870e_lcd_core::{
 
 #[derive(Parser)]
 #[command(name = "x870e-lcd")]
-#[command(about = "Linux management CLI for ASUS ROG Crosshair X870E Extreme 5\" LCD Panel")]
+#[command(about = "Linux management CLI for ASUS ROG Crosshair X870E Motherboard 5\" LCD Panels")]
 #[command(version)]
 struct Cli {
     #[command(subcommand)]
