@@ -180,6 +180,7 @@ pub struct LcdGuiApp {
 }
 
 impl LcdGuiApp {
+    /// Creates and initializes the ROG X870E LCD GUI application state and theme.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         // ROG Dark Theme
         let mut visuals = egui::Visuals::dark();
@@ -246,6 +247,7 @@ impl LcdGuiApp {
         }
     }
 
+    /// Attempts to discover and reconnect to a connected motherboard LCD panel.
     fn try_reconnect(&mut self) {
         match LcdDevice::open() {
             Ok(dev) => {
@@ -1689,6 +1691,7 @@ fn section_frame() -> egui::Frame {
 }
 
 impl eframe::App for LcdGuiApp {
+    /// Main GUI frame update loop, handling events, layout rendering, and telemetry dispatch.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Poll asynchronous upload and erase events from worker thread
         while let Ok(event) = self.upload_rx.try_recv() {

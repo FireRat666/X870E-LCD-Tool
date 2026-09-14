@@ -310,6 +310,7 @@ pub mod upload {
 mod tests {
     use super::*;
 
+    /// Tests USB product ID mapping and display name formatting for supported LCD models.
     #[test]
     fn test_lcd_model_pids_and_names() {
         assert_eq!(LcdModel::from_product_id(0x1c83), Some(LcdModel::Extreme));

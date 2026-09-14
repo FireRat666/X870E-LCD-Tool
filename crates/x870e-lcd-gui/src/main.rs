@@ -4,6 +4,7 @@ use anyhow::Result;
 use app::LcdGuiApp;
 use eframe::egui::Vec2;
 
+/// Entry point for the ROG X870E LCD graphical management application.
 fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 

@@ -135,6 +135,7 @@ enum CliHwLayout {
 }
 
 impl From<CliFitMode> for FitMode {
+    /// Converts a CLI fit mode argument into the core library [`FitMode`].
     fn from(mode: CliFitMode) -> Self {
         match mode {
             CliFitMode::Cover => FitMode::Cover,
@@ -145,6 +146,7 @@ impl From<CliFitMode> for FitMode {
 }
 
 impl From<CliHwLayout> for HwLayout {
+    /// Converts a CLI hardware layout argument into the core library [`HwLayout`].
     fn from(layout: CliHwLayout) -> Self {
         match layout {
             CliHwLayout::Single => HwLayout::Single,
@@ -155,6 +157,7 @@ impl From<CliHwLayout> for HwLayout {
     }
 }
 
+/// Entry point for the `x870e-lcd` command-line utility.
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env().add_directive(tracing::Level::INFO.into()))
