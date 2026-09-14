@@ -1,8 +1,14 @@
-# ASUS ROG Crosshair X870E Extreme 5-inch Motherboard LCD Panel
+# ASUS ROG Crosshair X870E Motherboard LCD Panels (Extreme: 0b05:1c83, Glacial: 0b05:1d93)
 # Grants user access to raw USB and hidraw devices without requiring root/sudo
 
 # USB Device (for Bulk endpoint image transfer)
+# ROG Crosshair X870E Extreme
 SUBSYSTEM=="usb", ATTR{idVendor}=="0b05", ATTR{idProduct}=="1c83", MODE="0666", TAG+="uaccess"
+# ROG Crosshair X870E Glacial (Experimental)
+SUBSYSTEM=="usb", ATTR{idVendor}=="0b05", ATTR{idProduct}=="1d93", MODE="0666", TAG+="uaccess"
 
 # HID Device (for command/control channel)
+# ROG Crosshair X870E Extreme
 KERNEL=="hidraw*", ATTRS{idVendor}=="0b05", ATTRS{idProduct}=="1c83", MODE="0666", TAG+="uaccess"
+# ROG Crosshair X870E Glacial (Experimental)
+KERNEL=="hidraw*", ATTRS{idVendor}=="0b05", ATTRS{idProduct}=="1d93", MODE="0666", TAG+="uaccess"

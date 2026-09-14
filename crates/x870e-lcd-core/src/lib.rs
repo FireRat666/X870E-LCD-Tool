@@ -8,8 +8,9 @@ pub mod catalog;
 
 pub use device::{LcdDevice, LcdError};
 pub use protocol::{
-    DisplayMode, HwLayout, FRAME_BYTES_PER_PIXEL, FRAME_HEIGHT, FRAME_RAW_SIZE, FRAME_WIDTH,
-    PANEL_HEIGHT, PANEL_WIDTH,
+    DisplayMode, HwLayout, LcdModel, LCD_PRODUCT_ID, LCD_PRODUCT_ID_GLACIAL,
+    LCD_PRODUCT_ID_EXTREME, SUPPORTED_PRODUCT_IDS, FRAME_BYTES_PER_PIXEL, FRAME_HEIGHT,
+    FRAME_RAW_SIZE, FRAME_WIDTH, PANEL_HEIGHT, PANEL_WIDTH,
 };
 pub use hwmon::{HardwareMonitor, TelemetrySnapshot, SensorMetric};
 pub use image::{

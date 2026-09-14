@@ -1,7 +1,58 @@
-//! Protocol definitions and packet builders for ASUS ROG Crosshair X870E Extreme LCD panel (0b05:1c83).
+//! Protocol definitions and packet builders for ASUS ROG Crosshair X870E Motherboard LCD panels.
 
+/// ASUS USB Vendor ID
 pub const ASUS_VENDOR_ID: u16 = 0x0b05;
-pub const LCD_PRODUCT_ID: u16 = 0x1c83;
+
+/// ASUS ROG Crosshair X870E Extreme 5.0" LCD Panel PID
+pub const LCD_PRODUCT_ID_EXTREME: u16 = 0x1c83;
+
+/// ASUS ROG Crosshair X870E Glacial 5.0" LCD Panel PID (Experimental)
+pub const LCD_PRODUCT_ID_GLACIAL: u16 = 0x1d93;
+
+/// Default / primary LCD product ID for backward compatibility
+pub const LCD_PRODUCT_ID: u16 = LCD_PRODUCT_ID_EXTREME;
+
+/// All supported ASUS Motherboard LCD product IDs
+pub const SUPPORTED_PRODUCT_IDS: &[u16] = &[
+    LCD_PRODUCT_ID_EXTREME,
+    LCD_PRODUCT_ID_GLACIAL,
+];
+
+/// Supported ASUS ROG Motherboard LCD models
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LcdModel {
+    /// ASUS ROG Crosshair X870E Extreme (0b05:1c83)
+    Extreme,
+    /// ASUS ROG Crosshair X870E Glacial (0b05:1d93)
+    Glacial,
+}
+
+impl LcdModel {
+    /// Returns the USB Product ID for this model.
+    pub fn product_id(&self) -> u16 {
+        match self {
+            Self::Extreme => LCD_PRODUCT_ID_EXTREME,
+            Self::Glacial => LCD_PRODUCT_ID_GLACIAL,
+        }
+    }
+
+    /// Returns a human-readable display name for this motherboard LCD panel model.
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::Extreme => "ROG Crosshair X870E Extreme",
+            Self::Glacial => "ROG Crosshair X870E Glacial (Experimental)",
+        }
+    }
+
+    /// Identifies the model from a USB Product ID, if supported.
+    pub fn from_product_id(pid: u16) -> Option<Self> {
+        match pid {
+            LCD_PRODUCT_ID_EXTREME => Some(Self::Extreme),
+            LCD_PRODUCT_ID_GLACIAL => Some(Self::Glacial),
+            _ => None,
+        }
+    }
+}
 
 pub const REPORT_ID: u8 = 0xec;
 pub const PACKET_LEN: usize = 65; // Report ID + 64 bytes
@@ -27,7 +78,7 @@ pub enum HwLayout {
 }
 
 impl HwLayout {
-    /// Returns the number of telemetry slots displayed for this layout mode.
+    /// Returns the number of sensor slots supported by this hardware layout.
     pub fn slot_count(&self) -> usize {
         match self {
             HwLayout::Single => 1,
@@ -193,7 +244,7 @@ pub mod upload {
         (p1, p2)
     }
 
-    /// Step 1: Upload preparation command (Cmd 0x71 0x01 0x01)
+    /// Step 1: Prepares the LCD controller for flash write sequence.
     pub fn step1_prep() -> [u8; PACKET_LEN] {
         let mut pkt = new_packet();
         pkt[1] = 0x71;
@@ -202,7 +253,7 @@ pub mod upload {
         pkt
     }
 
-    /// Step 2: Upload synchronization command (Cmd 0xf1)
+    /// Step 2: Synchronization command before writing image data.
     pub fn step2_sync() -> [u8; PACKET_LEN] {
         let mut pkt = new_packet();
         pkt[1] = 0xf1;
@@ -219,7 +270,7 @@ pub mod upload {
         pkt
     }
 
-    /// Step 4: Bulk transfer start handshake (Cmd 0x73 0x01)
+    /// Step 4: Initiates the transfer sequence for the payload.
     pub fn step4_start() -> [u8; PACKET_LEN] {
         let mut pkt = new_packet();
         pkt[1] = 0x73;
@@ -227,7 +278,7 @@ pub mod upload {
         pkt
     }
 
-    /// Step 5: Announces the upcoming payload size in little-endian format (Cmd 0x7f 0x02 [size_le32])
+    /// Step 5: Sends the payload size announcement header to the LCD controller.
     pub fn step5_size_header(jpeg_size: u32) -> [u8; PACKET_LEN] {
         let mut pkt = new_packet();
         pkt[1] = 0x7f;
@@ -237,7 +288,7 @@ pub mod upload {
         pkt
     }
 
-    /// Step 6: Finalize flash write after all bulk chunks have transferred (Cmd 0x73 0xff)
+    /// Step 6: Finalizes the flash write transaction.
     pub fn step6_finalize() -> [u8; PACKET_LEN] {
         let mut pkt = new_packet();
         pkt[1] = 0x73;
@@ -252,5 +303,25 @@ pub mod upload {
         pkt[2] = 0x01;
         pkt[3] = 0x00;
         pkt
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_lcd_model_pids_and_names() {
+        assert_eq!(LcdModel::from_product_id(0x1c83), Some(LcdModel::Extreme));
+        assert_eq!(LcdModel::from_product_id(0x1d93), Some(LcdModel::Glacial));
+        assert_eq!(LcdModel::from_product_id(0x1234), None);
+
+        let extreme = LcdModel::Extreme;
+        assert_eq!(extreme.product_id(), 0x1c83);
+        assert_eq!(extreme.display_name(), "ROG Crosshair X870E Extreme");
+
+        let glacial = LcdModel::Glacial;
+        assert_eq!(glacial.product_id(), 0x1d93);
+        assert_eq!(glacial.display_name(), "ROG Crosshair X870E Glacial (Experimental)");
     }
 }

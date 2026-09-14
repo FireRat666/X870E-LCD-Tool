@@ -9,8 +9,8 @@ use image::DynamicImage;
 
 use x870e_lcd_core::{
     calculate_crop_rect, crop_and_scale, encode_to_jpeg, load_and_prepare_jpeg, process_image,
-    DisplayMode, FitMode, HardwareMonitor, HwLayout, LcdDevice, SensorMetric, SlotCatalog,
-    SlotEntry, TelemetrySnapshot,
+    DisplayMode, FitMode, HardwareMonitor, HwLayout, LcdDevice, LcdModel, SensorMetric,
+    SlotCatalog, SlotEntry, TelemetrySnapshot,
 };
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -132,6 +132,7 @@ fn draw_dotted_rect(
 
 pub struct LcdGuiApp {
     device: Option<Arc<Mutex<LcdDevice>>>,
+    connected_model: Option<LcdModel>,
     connection_error: Option<String>,
 
     active_tab: ActiveTab,
@@ -188,9 +189,12 @@ impl LcdGuiApp {
         visuals.selection.bg_fill = Color32::from_rgb(220, 20, 60);
         cc.egui_ctx.set_visuals(visuals);
 
-        let (device, connection_error) = match LcdDevice::open() {
-            Ok(dev) => (Some(Arc::new(Mutex::new(dev))), None),
-            Err(e) => (None, Some(e.to_string())),
+        let (device, connected_model, connection_error) = match LcdDevice::open() {
+            Ok(dev) => {
+                let model = dev.model();
+                (Some(Arc::new(Mutex::new(dev))), Some(model), None)
+            }
+            Err(e) => (None, None, Some(e.to_string())),
         };
 
         let mut hwmon = HardwareMonitor::new();
@@ -200,6 +204,7 @@ impl LcdGuiApp {
 
         Self {
             device,
+            connected_model,
             connection_error,
             active_tab: ActiveTab::Display,
             brightness: 100,
@@ -244,11 +249,13 @@ impl LcdGuiApp {
     fn try_reconnect(&mut self) {
         match LcdDevice::open() {
             Ok(dev) => {
+                self.connected_model = Some(dev.model());
                 self.device = Some(Arc::new(Mutex::new(dev)));
                 self.connection_error = None;
             }
             Err(e) => {
                 self.device = None;
+                self.connected_model = None;
                 self.connection_error = Some(e.to_string());
             }
         }
@@ -920,13 +927,13 @@ impl eframe::App for LcdGuiApp {
                     ui.painter().rect_filled(accent_rect, 1.0, Color32::from_rgb(220, 20, 60));
                     ui.add_space(10.0);
 
-                    ui.heading(RichText::new("X870E EXTREME LCD TOOL").color(Color32::from_rgb(220, 20, 60)).strong().size(17.0));
+                    ui.heading(RichText::new("ROG X870E LCD TOOL").color(Color32::from_rgb(220, 20, 60)).strong().size(17.0));
                     ui.add_space(6.0);
-                    ui.label(RichText::new("ROG Crosshair X870E Extreme  |  5\" LCD Panel Manager").color(Color32::from_rgb(140, 140, 155)).size(12.0).italics());
+                    ui.label(RichText::new("ROG Crosshair X870E Series  |  5\" LCD Panel Manager").color(Color32::from_rgb(140, 140, 155)).size(12.0).italics());
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if self.device.is_some() {
-                            ui.label(RichText::new("●  Connected").color(Color32::from_rgb(50, 205, 50)).strong().size(12.0));
+                        if let Some(model) = self.connected_model {
+                            ui.label(RichText::new(format!("●  Connected ({})", model.display_name())).color(Color32::from_rgb(50, 205, 50)).strong().size(12.0));
                         } else {
                             if ui.add(egui::Button::new(RichText::new("⟳  Reconnect").size(12.0)).min_size(Vec2::new(90.0, 24.0))).clicked() {
                                 self.try_reconnect();

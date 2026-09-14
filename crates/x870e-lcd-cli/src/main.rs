@@ -164,9 +164,13 @@ fn main() -> Result<()> {
 
     match cli.command {
         Commands::Info => {
-            println!("Connecting to ASUS LCD Panel (0b05:1c83)...");
-            let _dev = LcdDevice::open().context("Failed to connect to LCD panel. Ensure udev rules are installed.")?;
-            println!("✓ Found and connected to ASUS Motherboard LCD Panel!");
+            println!("Connecting to ASUS Motherboard LCD Panel...");
+            let dev = LcdDevice::open().context("Failed to connect to LCD panel. Ensure udev rules are installed.")?;
+            println!(
+                "✓ Found and connected to ASUS {} (0b05:{:04x})!",
+                dev.model().display_name(),
+                dev.model().product_id()
+            );
             println!("  Resolution: 720 x 1280 (Portrait)");
             println!("  Interfaces: Interface 0 (Bulk EP2 OUT) & Interface 1 (HID Report 0xEC)");
         }
