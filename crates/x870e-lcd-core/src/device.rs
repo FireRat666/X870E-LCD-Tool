@@ -7,7 +7,7 @@ use tracing::{debug, info};
 
 use crate::protocol::{
     self, upload, DisplayMode, HwLayout, LcdModel, ASUS_VENDOR_ID, BULK_CHUNK_SIZE, BULK_EP_OUT,
-    LCD_PRODUCT_ID, PACKET_LEN, SUPPORTED_PRODUCT_IDS,
+    LCD_PRODUCT_ID, PACKET_LEN,
 };
 
 #[derive(Error, Debug)]
@@ -44,45 +44,23 @@ impl LcdDevice {
     /// Discovers and opens both the HID control channel and Bulk USB channel.
     pub fn open() -> Result<Self, LcdError> {
         let hid_api = hidapi::HidApi::new()?;
-        
-        let mut target_device_info = None;
-        let mut detected_model = None;
 
-        for dev in hid_api.device_list() {
-            if dev.vendor_id() == ASUS_VENDOR_ID && SUPPORTED_PRODUCT_IDS.contains(&dev.product_id()) {
-                if dev.interface_number() == 1 || dev.interface_number() == -1 {
-                    if let Some(model) = LcdModel::from_product_id(dev.product_id()) {
-                        target_device_info = Some(dev);
-                        detected_model = Some(model);
-                        break;
-                    }
-                }
+        let matched_hid = hid_api.device_list().find_map(|dev| {
+            let is_target_interface = dev.interface_number() == 1 || dev.interface_number() == -1;
+            if dev.vendor_id() == ASUS_VENDOR_ID && is_target_interface {
+                LcdModel::from_product_id(dev.product_id()).map(|model| (dev, model))
+            } else {
+                None
             }
-        }
+        });
 
-        let (hid_device, model) = if let (Some(info), Some(model)) = (target_device_info, detected_model) {
-            (info.open_device(&hid_api)?, model)
-        } else {
-            let dev = hid_api.open(ASUS_VENDOR_ID, LCD_PRODUCT_ID)?;
-            (dev, LcdModel::Extreme)
+        let (hid_device, model) = match matched_hid {
+            Some((info, model)) => (info.open_device(&hid_api)?, model),
+            None => (hid_api.open(ASUS_VENDOR_ID, LCD_PRODUCT_ID)?, LcdModel::Extreme),
         };
 
         let target_pid = model.product_id();
-        let mut usb_handle = None;
-        for dev in rusb::devices()?.iter() {
-            if let Ok(desc) = dev.device_descriptor() {
-                if desc.vendor_id() == ASUS_VENDOR_ID && desc.product_id() == target_pid {
-                    let handle = dev.open()?;
-                    let _ = handle.set_auto_detach_kernel_driver(true);
-                    handle.claim_interface(0)?;
-                    usb_handle = Some(handle);
-                    break;
-                }
-            }
-        }
-
-        let usb_handle = usb_handle
-            .ok_or(LcdError::NotFound(ASUS_VENDOR_ID, target_pid))?;
+        let usb_handle = open_bulk_handle(target_pid)?;
 
         info!(
             "Successfully opened ASUS {} Motherboard LCD Panel (0b05:{:04x})",
@@ -329,4 +307,21 @@ impl LcdDevice {
 
         Ok(())
     }
+}
+
+/// Opens the USB bulk interface for the target product ID.
+fn open_bulk_handle(target_pid: u16) -> Result<rusb::DeviceHandle<rusb::GlobalContext>, LcdError> {
+    for dev in rusb::devices()?.iter() {
+        let desc = match dev.device_descriptor() {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+        if desc.vendor_id() == ASUS_VENDOR_ID && desc.product_id() == target_pid {
+            let handle = dev.open()?;
+            let _ = handle.set_auto_detach_kernel_driver(true);
+            handle.claim_interface(0)?;
+            return Ok(handle);
+        }
+    }
+    Err(LcdError::NotFound(ASUS_VENDOR_ID, target_pid))
 }
