@@ -1007,12 +1007,9 @@ impl LcdGuiApp {
 
     }
 
-    /// Renders the Display and Settings tab content.
-    fn render_display_tab(&mut self, ui: &mut egui::Ui) {
-        let section_frame = section_frame();
-
-        // ── Section: Power & Backlight ────────────────────────────
-        section_frame.show(ui, |ui| {
+    /// Renders the power toggle button and backlight brightness slider controls.
+    fn render_power_section(&mut self, ui: &mut egui::Ui) {
+        section_frame().show(ui, |ui| {
             ui.label(RichText::new("POWER & BACKLIGHT").size(11.0).monospace().color(Color32::from_rgb(120, 120, 145)));
             ui.add_space(6.0);
 
@@ -1052,11 +1049,11 @@ impl LcdGuiApp {
                 }
             });
         });
+    }
 
-        ui.add_space(8.0);
-
-        // ── Section: Sleep & Standby ──────────────────────────────
-        section_frame.show(ui, |ui| {
+    /// Renders the sleep and standby power persistent wallpaper settings.
+    fn render_standby_section(&mut self, ui: &mut egui::Ui) {
+        section_frame().show(ui, |ui| {
             ui.label(RichText::new("SLEEP & STANDBY").size(11.0).monospace().color(Color32::from_rgb(120, 120, 145)));
             ui.add_space(6.0);
             let mut standby = self.standby_wallpaper;
@@ -1066,11 +1063,11 @@ impl LcdGuiApp {
             ui.add_space(4.0);
             ui.label(RichText::new("Hardware-level setting (USB Cmd 0x5c, byte 16). When enabled, keeps the default wallpaper lit on 5V standby power while the PC sleeps. When disabled, the display turns off.").italics().size(11.0).color(Color32::from_rgb(140, 140, 158)));
         });
+    }
 
-        ui.add_space(8.0);
-
-        // ── Section: Temperature Alert ────────────────────────────
-        section_frame.show(ui, |ui| {
+    /// Renders the temperature alert thresholds and visual overheat warning settings.
+    fn render_temp_alert_section(&mut self, ui: &mut egui::Ui) {
+        section_frame().show(ui, |ui| {
             ui.label(RichText::new("TEMPERATURE WARNING ALERT").size(11.0).monospace().color(Color32::from_rgb(120, 120, 145)));
             ui.add_space(6.0);
             ui.horizontal(|ui| {
@@ -1096,11 +1093,11 @@ impl LcdGuiApp {
                 ui.label(RichText::new(format!("Current CPU: {t:.1}°C   |   Alert at ≥ {}°C", self.temp_warning_threshold)).size(11.0).color(temp_color));
             }
         });
+    }
 
-        ui.add_space(8.0);
-
-        // ── Section: Switch Display Mode ──────────────────────────
-        section_frame.show(ui, |ui| {
+    /// Renders the display mode selection options (hardware monitor, animations, custom slots).
+    fn render_mode_switch_section(&mut self, ui: &mut egui::Ui) {
+        section_frame().show(ui, |ui| {
             ui.label(RichText::new("SWITCH DISPLAY MODE").size(11.0).monospace().color(Color32::from_rgb(120, 120, 145)));
             ui.add_space(8.0);
 
@@ -1214,6 +1211,17 @@ impl LcdGuiApp {
         });
     }
 
+    /// Renders the Display and Settings tab content.
+    fn render_display_tab(&mut self, ui: &mut egui::Ui) {
+        self.render_power_section(ui);
+        ui.add_space(8.0);
+        self.render_standby_section(ui);
+        ui.add_space(8.0);
+        self.render_temp_alert_section(ui);
+        ui.add_space(8.0);
+        self.render_mode_switch_section(ui);
+    }
+
     /// Renders the Hardware Telemetry tab content.
     fn render_telemetry_tab(&mut self, ui: &mut egui::Ui) {
         ui.heading("Hardware Monitor Configuration");
@@ -1305,9 +1313,8 @@ impl LcdGuiApp {
         }
     }
 
-    /// Renders the Wallpapers and Custom Image Upload tab content.
-    fn render_image_upload_tab(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        // Modal delete confirmation dialog
+    /// Renders the modal delete confirmation dialog for erasing a custom image slot.
+    fn render_delete_modal(&mut self, ctx: &egui::Context) {
         if let Some(slot_to_delete) = self.delete_confirm {
             egui::Window::new("⚠️ Confirm Delete Image")
                 .collapsible(false)
@@ -1333,8 +1340,10 @@ impl LcdGuiApp {
                     ui.add_space(4.0);
                 });
         }
+    }
 
-        // Header: Mode Switcher & Capacity Stats
+    /// Renders the header and storage capacity statistics for the wallpapers tab.
+    fn render_wallpaper_header(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.heading("Wallpapers & Custom Images");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1346,8 +1355,10 @@ impl LcdGuiApp {
         });
         ui.label("Display factory built-in wallpapers or upload custom images to the motherboard's 64MB SPI flash.");
         ui.add_space(10.0);
+    }
 
-        // 1. Factory Built-in Wallpapers (ROM Presets 0..=5)
+    /// Renders the horizontal carousel of factory default ROM wallpaper presets.
+    fn render_default_wallpapers_carousel(&mut self, ui: &mut egui::Ui) {
         ui.label(RichText::new("Factory Default Wallpapers (ROM)").strong());
         ui.add_space(4.0);
         let presets: [u8; 6] = [0, 1, 2, 3, 4, 5];
@@ -1405,10 +1416,170 @@ impl LcdGuiApp {
                 }
             });
         });
-
         ui.add_space(14.0);
+    }
 
-        // 2. Custom Flashed Images (SPI Flash Storage)
+    /// Renders a single custom image card in the custom images carousel.
+    fn render_custom_image_card(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, slot: u8, entry: &x870e_lcd_core::SlotEntry) -> Option<u8> {
+        let is_active = self.current_mode == format!("Custom Slot {slot}");
+        let card_w = 90.0;
+        let card_h = 160.0;
+        let (rect, response) = ui.allocate_exact_size(Vec2::new(card_w, card_h), egui::Sense::click());
+
+        let bg_color = if is_active {
+            Color32::from_rgb(45, 20, 28)
+        } else if response.hovered() {
+            Color32::from_rgb(38, 38, 50)
+        } else {
+            Color32::from_rgb(26, 26, 36)
+        };
+        let border_color = if is_active {
+            Color32::from_rgb(220, 20, 60)
+        } else if response.hovered() {
+            Color32::from_rgb(140, 140, 160)
+        } else {
+            Color32::from_rgb(60, 60, 75)
+        };
+        let stroke_w = if is_active { 2.0_f32 } else { 1.0_f32 };
+
+        ui.painter().rect_filled(rect, 6.0, bg_color);
+
+        if let Some(tex) = self.get_or_load_thumbnail(slot, ctx) {
+            let thumb_rect = egui::Rect::from_min_max(
+                egui::pos2(rect.min.x + 5.0, rect.min.y + 5.0),
+                egui::pos2(rect.max.x - 5.0, rect.max.y - 30.0),
+            );
+            ui.painter().image(tex.id(), thumb_rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
+        } else {
+            let center = rect.center();
+            ui.painter().text(
+                egui::pos2(center.x, center.y - 15.0),
+                egui::Align2::CENTER_CENTER,
+                "🖼",
+                egui::FontId::proportional(28.0),
+                Color32::from_rgb(140, 140, 160),
+            );
+        }
+
+        ui.painter().rect_stroke(rect, 6.0, egui::Stroke::new(stroke_w, border_color), egui::StrokeKind::Outside);
+
+        let display_title = if entry.title.len() > 11 {
+            format!("{}…", &entry.title[..10])
+        } else {
+            entry.title.clone()
+        };
+        ui.painter().text(
+            egui::pos2(rect.center().x, rect.max.y - 19.0),
+            egui::Align2::CENTER_CENTER,
+            display_title,
+            egui::FontId::proportional(11.0),
+            Color32::WHITE,
+        );
+        ui.painter().text(
+            egui::pos2(rect.center().x, rect.max.y - 7.0),
+            egui::Align2::CENTER_CENTER,
+            format!("Slot {slot}  •  {:.0}KB", entry.file_size_bytes as f64 / 1024.0),
+            egui::FontId::monospace(9.0),
+            Color32::from_rgb(150, 150, 165),
+        );
+
+        let btn_size = 20.0;
+        let btn_rect = egui::Rect::from_min_size(
+            egui::pos2(rect.max.x - btn_size - 4.0, rect.min.y + 4.0),
+            Vec2::new(btn_size, btn_size),
+        );
+        let delete_btn_resp = ui.allocate_rect(btn_rect, egui::Sense::click());
+        let btn_hovered = delete_btn_resp.hovered();
+        let btn_bg = if btn_hovered {
+            Color32::from_rgb(220, 20, 50)
+        } else {
+            Color32::from_rgba_premultiplied(40, 40, 50, 200)
+        };
+        ui.painter().rect_filled(btn_rect, 4.0, btn_bg);
+        ui.painter().text(
+            btn_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "✕",
+            egui::FontId::proportional(11.0),
+            Color32::WHITE,
+        );
+
+        let mut del_slot = None;
+        if delete_btn_resp.clicked() {
+            del_slot = Some(slot);
+        } else if response.clicked() {
+            self.selected_custom_slot = slot;
+            self.set_mode(DisplayMode::CustomSlot(slot), &format!("Custom Slot {slot}"));
+        }
+
+        delete_btn_resp.on_hover_text(format!("Erase custom image Slot {} from SPI flash memory", slot));
+        response.on_hover_text(format!("Click to display \"{}\" (Custom Slot {}) on LCD", entry.title, slot));
+        ui.add_space(6.0);
+
+        del_slot
+    }
+
+    /// Renders the add image card button in the custom images carousel.
+    fn render_add_image_card(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, free_slot_opt: Option<u8>) {
+        let add_card_w = 90.0;
+        let add_card_h = 160.0;
+        let (add_rect, add_resp) = ui.allocate_exact_size(Vec2::new(add_card_w, add_card_h), egui::Sense::click());
+
+        let add_bg = if add_resp.hovered() {
+            Color32::from_rgb(35, 45, 40)
+        } else {
+            Color32::from_rgb(24, 30, 28)
+        };
+        let add_border = if add_resp.hovered() {
+            Color32::from_rgb(50, 205, 50)
+        } else {
+            Color32::from_rgb(45, 90, 60)
+        };
+        ui.painter().rect_filled(add_rect, 6.0, add_bg);
+        ui.painter().rect_stroke(add_rect, 6.0, egui::Stroke::new(1.0_f32, add_border), egui::StrokeKind::Outside);
+
+        let add_center = add_rect.center();
+        ui.painter().text(
+            egui::pos2(add_center.x, add_center.y - 22.0),
+            egui::Align2::CENTER_CENTER,
+            "➕",
+            egui::FontId::proportional(30.0),
+            Color32::from_rgb(50, 220, 80),
+        );
+        ui.painter().text(
+            egui::pos2(add_center.x, add_center.y + 10.0),
+            egui::Align2::CENTER_CENTER,
+            "Add Image",
+            egui::FontId::proportional(12.0),
+            Color32::WHITE,
+        );
+        let subtext = match free_slot_opt {
+            Some(s) => format!("Next: Slot {s}"),
+            None => "Full (255/255)".to_string(),
+        };
+        ui.painter().text(
+            egui::pos2(add_center.x, add_center.y + 26.0),
+            egui::Align2::CENTER_CENTER,
+            subtext,
+            egui::FontId::monospace(9.0),
+            Color32::from_rgb(140, 200, 160),
+        );
+
+        if add_resp.clicked() && free_slot_opt.is_some() && !self.is_flashing {
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("Images", &["png", "jpg", "jpeg", "webp", "bmp", "gif"])
+                .pick_file()
+            {
+                let slot = self.catalog.next_free_slot(256).unwrap_or(self.selected_custom_slot);
+                self.selected_custom_slot = slot;
+                self.open_crop_modal(path, slot, ctx);
+            }
+        }
+        add_resp.on_hover_text("Browse an image file to automatically flash into the next free SPI slot");
+    }
+
+    /// Renders the horizontal carousel of flashed custom images and the add button.
+    fn render_custom_images_carousel(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui.horizontal(|ui| {
             ui.label(RichText::new("Custom Images (Motherboard SPI Storage)").strong());
             let free_slot = self.catalog.next_free_slot(256);
@@ -1421,256 +1592,112 @@ impl LcdGuiApp {
         ui.add_space(4.0);
 
         let mut slot_to_delete = None;
-        let mut action_add_image = false;
+        let free_slot_opt = self.catalog.next_free_slot(256);
 
         egui::ScrollArea::horizontal().id_salt("custom_images_scroll").show(ui, |ui| {
             ui.horizontal(|ui| {
-                // 2a. Installed Custom Image Cards
                 let slots: Vec<(u8, x870e_lcd_core::SlotEntry)> = self.catalog.slots.iter().map(|(k, v)| (*k, v.clone())).collect();
                 for (slot, entry) in slots {
-                    let is_active = self.current_mode == format!("Custom Slot {slot}");
-                    let card_w = 90.0;
-                    let card_h = 160.0;
-                    let (rect, response) = ui.allocate_exact_size(Vec2::new(card_w, card_h), egui::Sense::click());
-
-                    let bg_color = if is_active {
-                        Color32::from_rgb(45, 20, 28)
-                    } else if response.hovered() {
-                        Color32::from_rgb(38, 38, 50)
-                    } else {
-                        Color32::from_rgb(26, 26, 36)
-                    };
-                    let border_color = if is_active {
-                        Color32::from_rgb(220, 20, 60)
-                    } else if response.hovered() {
-                        Color32::from_rgb(140, 140, 160)
-                    } else {
-                        Color32::from_rgb(60, 60, 75)
-                    };
-                    let stroke_w = if is_active { 2.0_f32 } else { 1.0_f32 };
-
-                    ui.painter().rect_filled(rect, 6.0, bg_color);
-
-                    // Thumbnail fills most of the card, leaving 30px footer for labels
-                    if let Some(tex) = self.get_or_load_thumbnail(slot, ctx) {
-                        let thumb_rect = egui::Rect::from_min_max(
-                            egui::pos2(rect.min.x + 5.0, rect.min.y + 5.0),
-                            egui::pos2(rect.max.x - 5.0, rect.max.y - 30.0),
-                        );
-                        ui.painter().image(tex.id(), thumb_rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
-                    } else {
-                        let center = rect.center();
-                        ui.painter().text(
-                            egui::pos2(center.x, center.y - 15.0),
-                            egui::Align2::CENTER_CENTER,
-                            "🖼",
-                            egui::FontId::proportional(28.0),
-                            Color32::from_rgb(140, 140, 160),
-                        );
+                    if let Some(del) = self.render_custom_image_card(ui, ctx, slot, &entry) {
+                        slot_to_delete = Some(del);
                     }
-
-                    ui.painter().rect_stroke(rect, 6.0, egui::Stroke::new(stroke_w, border_color), egui::StrokeKind::Outside);
-
-                    // Title & Slot label at bottom (30px footer)
-                    let display_title = if entry.title.len() > 11 {
-                        format!("{}…", &entry.title[..10])
-                    } else {
-                        entry.title.clone()
-                    };
-                    ui.painter().text(
-                        egui::pos2(rect.center().x, rect.max.y - 19.0),
-                        egui::Align2::CENTER_CENTER,
-                        display_title,
-                        egui::FontId::proportional(11.0),
-                        Color32::WHITE,
-                    );
-                    ui.painter().text(
-                        egui::pos2(rect.center().x, rect.max.y - 7.0),
-                        egui::Align2::CENTER_CENTER,
-                        format!("Slot {slot}  •  {:.0}KB", entry.file_size_bytes as f64 / 1024.0),
-                        egui::FontId::monospace(9.0),
-                        Color32::from_rgb(150, 150, 165),
-                    );
-
-                    // Hover delete button "X" in top right corner
-                    let btn_size = 20.0;
-                    let btn_rect = egui::Rect::from_min_size(
-                        egui::pos2(rect.max.x - btn_size - 4.0, rect.min.y + 4.0),
-                        Vec2::new(btn_size, btn_size),
-                    );
-                    let delete_btn_resp = ui.allocate_rect(btn_rect, egui::Sense::click());
-                    let btn_hovered = delete_btn_resp.hovered();
-                    let btn_bg = if btn_hovered {
-                        Color32::from_rgb(220, 20, 50)
-                    } else {
-                        Color32::from_rgba_premultiplied(40, 40, 50, 200)
-                    };
-                    ui.painter().rect_filled(btn_rect, 4.0, btn_bg);
-                    ui.painter().text(
-                        btn_rect.center(),
-                        egui::Align2::CENTER_CENTER,
-                        "✕",
-                        egui::FontId::proportional(11.0),
-                        Color32::WHITE,
-                    );
-
-                    if delete_btn_resp.clicked() {
-                        slot_to_delete = Some(slot);
-                    } else if response.clicked() {
-                        self.selected_custom_slot = slot;
-                        self.set_mode(DisplayMode::CustomSlot(slot), &format!("Custom Slot {slot}"));
-                    }
-
-                    delete_btn_resp.on_hover_text(format!("Erase custom image Slot {} from SPI flash memory", slot));
-                    response.on_hover_text(format!("Click to display \"{}\" (Custom Slot {}) on LCD", entry.title, slot));
-
-                    ui.add_space(6.0);
                 }
-
-                // 2b. The "+ Add Image" Card (Puts image in next free slot)
-                let free_slot_opt = self.catalog.next_free_slot(256);
-                let add_card_w = 90.0;
-                let add_card_h = 160.0;
-                let (add_rect, add_resp) = ui.allocate_exact_size(Vec2::new(add_card_w, add_card_h), egui::Sense::click());
-
-                let add_bg = if add_resp.hovered() {
-                    Color32::from_rgb(35, 45, 40)
-                } else {
-                    Color32::from_rgb(24, 30, 28)
-                };
-                let add_border = if add_resp.hovered() {
-                    Color32::from_rgb(50, 205, 50)
-                } else {
-                    Color32::from_rgb(45, 90, 60)
-                };
-                ui.painter().rect_filled(add_rect, 6.0, add_bg);
-                ui.painter().rect_stroke(add_rect, 6.0, egui::Stroke::new(1.0_f32, add_border), egui::StrokeKind::Outside);
-
-                let add_center = add_rect.center();
-                ui.painter().text(
-                    egui::pos2(add_center.x, add_center.y - 22.0),
-                    egui::Align2::CENTER_CENTER,
-                    "➕",
-                    egui::FontId::proportional(30.0),
-                    Color32::from_rgb(50, 220, 80),
-                );
-                ui.painter().text(
-                    egui::pos2(add_center.x, add_center.y + 10.0),
-                    egui::Align2::CENTER_CENTER,
-                    "Add Image",
-                    egui::FontId::proportional(12.0),
-                    Color32::WHITE,
-                );
-                let subtext = match free_slot_opt {
-                    Some(s) => format!("Next: Slot {s}"),
-                    None => "Full (255/255)".to_string(),
-                };
-                ui.painter().text(
-                    egui::pos2(add_center.x, add_center.y + 26.0),
-                    egui::Align2::CENTER_CENTER,
-                    subtext,
-                    egui::FontId::monospace(9.0),
-                    Color32::from_rgb(140, 200, 160),
-                );
-
-                if add_resp.clicked() && free_slot_opt.is_some() && !self.is_flashing {
-                    action_add_image = true;
-                }
-                add_resp.on_hover_text("Browse an image file to automatically flash into the next free SPI slot");
+                self.render_add_image_card(ui, ctx, free_slot_opt);
             });
         });
-
 
         if let Some(slot) = slot_to_delete {
             self.delete_confirm = Some(slot);
         }
+    }
 
-        if action_add_image {
-            if let Some(path) = rfd::FileDialog::new()
-                .add_filter("Images", &["png", "jpg", "jpeg", "webp", "bmp", "gif"])
-                .pick_file()
-            {
-                let slot = self.catalog.next_free_slot(256).unwrap_or(self.selected_custom_slot);
-                self.selected_custom_slot = slot;
-                self.open_crop_modal(path, slot, ctx);
-            }
+    /// Renders the advanced slot management and manual image controls section.
+    fn render_advanced_slot_controls(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        if !self.advanced_mode {
+            return;
         }
 
-        // 3. Advanced Mode Controls (visible when advanced_mode is enabled)
-        if self.advanced_mode {
-            ui.add_space(14.0);
-            ui.separator();
-            ui.add_space(8.0);
-            ui.heading("⚙ Advanced Slot Management & Manual Controls");
-            ui.label("Directly target specific slots (0..=255), force overwrite, adjust JPEG quality and scaling modes.");
-            ui.add_space(6.0);
+        ui.add_space(14.0);
+        ui.separator();
+        ui.add_space(8.0);
+        ui.heading("⚙ Advanced Slot Management & Manual Controls");
+        ui.label("Directly target specific slots (0..=255), force overwrite, adjust JPEG quality and scaling modes.");
+        ui.add_space(6.0);
 
-            ui.horizontal(|ui| {
-                ui.label("Target Destination Slot:");
-                ui.add(egui::DragValue::new(&mut self.selected_custom_slot).range(0..=255).prefix("Slot "));
-                ComboBox::from_id_salt("adv_upload_slot_select")
-                    .selected_text(format!("Custom Slot {} (SPI Flash)", self.selected_custom_slot))
-                    .show_ui(ui, |ui| {
-                        for s in 0..=255 {
-                            let tag = if self.catalog.is_occupied(s) { " [Occupied]" } else { " [Free]" };
-                            ui.selectable_value(&mut self.selected_custom_slot, s, format!("Custom Slot {s}{tag}"));
-                        }
-                    });
-
-                ui.add_space(15.0);
-                let can_erase = !self.is_flashing && self.device.is_some();
-                if ui.add_enabled(can_erase, egui::Button::new(RichText::new(format!("🗑 Erase Slot {}", self.selected_custom_slot)).color(Color32::from_rgb(255, 100, 100)))).clicked() {
-                    self.delete_confirm = Some(self.selected_custom_slot);
-                }
-            });
-
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                if ui.button("📂 Browse Image File...").clicked() {
-                    if let Some(path) = rfd::FileDialog::new()
-                        .add_filter("Images", &["png", "jpg", "jpeg", "webp", "bmp", "gif"])
-                        .pick_file()
-                    {
-                        self.open_crop_modal(path, self.selected_custom_slot, ctx);
+        ui.horizontal(|ui| {
+            ui.label("Target Destination Slot:");
+            ui.add(egui::DragValue::new(&mut self.selected_custom_slot).range(0..=255).prefix("Slot "));
+            ComboBox::from_id_salt("adv_upload_slot_select")
+                .selected_text(format!("Custom Slot {} (SPI Flash)", self.selected_custom_slot))
+                .show_ui(ui, |ui| {
+                    for s in 0..=255 {
+                        let tag = if self.catalog.is_occupied(s) { " [Occupied]" } else { " [Free]" };
+                        ui.selectable_value(&mut self.selected_custom_slot, s, format!("Custom Slot {s}{tag}"));
                     }
-                }
-                if let Some(path) = &self.selected_image_path {
-                    ui.label(format!("File: {}", path.file_name().unwrap_or_default().to_string_lossy()));
-                    if ui.button("✂ Crop & Adjust Framing...").clicked() {
-                        self.open_crop_modal(path.clone(), self.selected_custom_slot, ctx);
-                    }
-                }
-            });
+                });
 
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                ui.label("Scaling Mode:");
-                let prev_fit = self.fit_mode;
-                ui.radio_value(&mut self.fit_mode, FitMode::Cover, "Cover");
-                ui.radio_value(&mut self.fit_mode, FitMode::Fit, "Fit");
-                ui.radio_value(&mut self.fit_mode, FitMode::Stretch, "Stretch");
-                if prev_fit != self.fit_mode {
-                    self.refresh_preview_texture(ctx);
-                }
+            ui.add_space(15.0);
+            let can_erase = !self.is_flashing && self.device.is_some();
+            if ui.add_enabled(can_erase, egui::Button::new(RichText::new(format!("🗑 Erase Slot {}", self.selected_custom_slot)).color(Color32::from_rgb(255, 100, 100)))).clicked() {
+                self.delete_confirm = Some(self.selected_custom_slot);
+            }
+        });
 
-                ui.add_space(16.0);
-                ui.add(Slider::new(&mut self.jpeg_quality, 50..=100).text("JPEG Quality"));
-            });
-
-            ui.add_space(10.0);
-            let can_upload = !self.is_flashing && self.selected_image_path.is_some() && self.device.is_some();
-            let flash_btn_text = if self.is_flashing {
-                format!("⏳ Flashing to Slot {} (SPI Lockstep)...", self.selected_custom_slot)
-            } else {
-                format!("⚡ Flash Image to Motherboard LCD (Slot {})", self.selected_custom_slot)
-            };
-
-            if ui.add_enabled(can_upload, egui::Button::new(RichText::new(flash_btn_text).strong())).clicked() {
-                if let Some(path) = &self.selected_image_path {
-                    self.flash_custom_image(path.clone(), self.selected_custom_slot, self.fit_mode, self.jpeg_quality);
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            if ui.button("📂 Browse Image File...").clicked() {
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("Images", &["png", "jpg", "jpeg", "webp", "bmp", "gif"])
+                    .pick_file()
+                {
+                    self.open_crop_modal(path, self.selected_custom_slot, ctx);
                 }
             }
+            if let Some(path) = &self.selected_image_path {
+                ui.label(format!("File: {}", path.file_name().unwrap_or_default().to_string_lossy()));
+                if ui.button("✂ Crop & Adjust Framing...").clicked() {
+                    self.open_crop_modal(path.clone(), self.selected_custom_slot, ctx);
+                }
+            }
+        });
+
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.label("Scaling Mode:");
+            let prev_fit = self.fit_mode;
+            ui.radio_value(&mut self.fit_mode, FitMode::Cover, "Cover");
+            ui.radio_value(&mut self.fit_mode, FitMode::Fit, "Fit");
+            ui.radio_value(&mut self.fit_mode, FitMode::Stretch, "Stretch");
+            if prev_fit != self.fit_mode {
+                self.refresh_preview_texture(ctx);
+            }
+
+            ui.add_space(16.0);
+            ui.add(Slider::new(&mut self.jpeg_quality, 50..=100).text("JPEG Quality"));
+        });
+
+        ui.add_space(10.0);
+        let can_upload = !self.is_flashing && self.selected_image_path.is_some() && self.device.is_some();
+        let flash_btn_text = if self.is_flashing {
+            format!("⏳ Flashing to Slot {} (SPI Lockstep)...", self.selected_custom_slot)
+        } else {
+            format!("⚡ Flash Image to Motherboard LCD (Slot {})", self.selected_custom_slot)
+        };
+
+        if ui.add_enabled(can_upload, egui::Button::new(RichText::new(flash_btn_text).strong())).clicked() {
+            if let Some(path) = &self.selected_image_path {
+                self.flash_custom_image(path.clone(), self.selected_custom_slot, self.fit_mode, self.jpeg_quality);
+            }
         }
+    }
+
+    /// Renders the Wallpapers and Custom Image Upload tab content.
+    fn render_image_upload_tab(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        self.render_delete_modal(ctx);
+        self.render_wallpaper_header(ui);
+        self.render_default_wallpapers_carousel(ui);
+        self.render_custom_images_carousel(ui, ctx);
+        self.render_advanced_slot_controls(ui, ctx);
 
         if let Some((msg, is_err)) = &self.upload_status {
             ui.add_space(10.0);
@@ -1690,10 +1717,9 @@ fn section_frame() -> egui::Frame {
         .corner_radius(6.0)
 }
 
-impl eframe::App for LcdGuiApp {
-    /// Main GUI frame update loop, handling events, layout rendering, and telemetry dispatch.
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Poll asynchronous upload and erase events from worker thread
+impl LcdGuiApp {
+    /// Consumes and applies pending asynchronous upload and erase events from the background channel.
+    fn handle_upload_events(&mut self) {
         while let Ok(event) = self.upload_rx.try_recv() {
             match event {
                 UploadEvent::Progress(msg) => {
@@ -1719,91 +1745,112 @@ impl eframe::App for LcdGuiApp {
                 }
             }
         }
+    }
 
-        // Drag & drop image support (opens interactive crop & adjust modal)
+    /// Handles drag-and-drop image file inputs from the operating system.
+    fn handle_dropped_files(&mut self, ctx: &egui::Context) {
         ctx.input(|i| {
-            if !i.raw.dropped_files.is_empty() {
-                for file in &i.raw.dropped_files {
-                    let target_slot = self.catalog.next_free_slot(256).unwrap_or(self.selected_custom_slot);
-                    if let Some(path) = &file.path {
-                        self.open_crop_modal(path.clone(), target_slot, ctx);
-                        self.active_tab = ActiveTab::ImageUpload;
-                        break;
-                    } else if let Some(bytes) = &file.bytes {
-                        self.open_crop_modal_from_bytes(bytes, &file.name, target_slot, ctx);
-                        self.active_tab = ActiveTab::ImageUpload;
-                        break;
-                    }
+            if i.raw.dropped_files.is_empty() {
+                return;
+            }
+            let target_slot = self.catalog.next_free_slot(256).unwrap_or(self.selected_custom_slot);
+            for file in &i.raw.dropped_files {
+                if let Some(path) = &file.path {
+                    self.open_crop_modal(path.clone(), target_slot, ctx);
+                    self.active_tab = ActiveTab::ImageUpload;
+                    break;
+                }
+                if let Some(bytes) = &file.bytes {
+                    self.open_crop_modal_from_bytes(bytes, &file.name, target_slot, ctx);
+                    self.active_tab = ActiveTab::ImageUpload;
+                    break;
                 }
             }
         });
+    }
 
-        // Periodic telemetry streaming
-        if self.telemetry_streaming && self.last_telemetry_tick.elapsed() >= Duration::from_millis(800) {
-            self.last_telemetry_tick = std::time::Instant::now();
-            self.latest_snapshot = self.hwmon.refresh();
-
-            let is_warning = self.temp_warning_enabled && (
-                self.latest_snapshot.cpu_temp_c.map(|t| t as u32 >= self.temp_warning_threshold).unwrap_or(false)
-                || self.latest_snapshot.gpu_temp_c.map(|t| t as u32 >= self.temp_warning_threshold).unwrap_or(false)
-            );
-
-            if let Some(dev) = &self.device {
-                if let Ok(dev) = dev.lock() {
-                    let count = self.hw_layout.slot_count();
-                    for slot in 0..count {
-                        let metric = self.slot_metrics[slot];
-                        let (label, val) = if is_warning && slot == 0 {
-                            ("TEMP WARN", format!("{:.1}\u{2103} !", self.latest_snapshot.cpu_temp_c.unwrap_or(0.0)))
-                        } else {
-                            metric.format(&self.latest_snapshot)
-                        };
-                        let _ = dev.update_telemetry_slot(slot as u8, label, &val);
-                    }
-                }
-            }
-            ctx.request_repaint();
+    /// Periodically updates and dispatches live telemetry metrics to the LCD hardware.
+    fn tick_telemetry(&mut self, ctx: &egui::Context) {
+        if !self.telemetry_streaming || self.last_telemetry_tick.elapsed() < Duration::from_millis(800) {
+            return;
         }
+        self.last_telemetry_tick = std::time::Instant::now();
+        self.latest_snapshot = self.hwmon.refresh();
 
-        // Top Status Bar
+        let is_warning = self.temp_warning_enabled && (
+            self.latest_snapshot.cpu_temp_c.map(|t| t as u32 >= self.temp_warning_threshold).unwrap_or(false)
+            || self.latest_snapshot.gpu_temp_c.map(|t| t as u32 >= self.temp_warning_threshold).unwrap_or(false)
+        );
+
+        let dev_arc = match &self.device {
+            Some(d) => d.clone(),
+            None => return,
+        };
+
+        if let Ok(dev) = dev_arc.lock() {
+            let count = self.hw_layout.slot_count();
+            for slot in 0..count {
+                let metric = self.slot_metrics[slot];
+                let (label, val) = if is_warning && slot == 0 {
+                    ("TEMP WARN", format!("{:.1}\u{2103} !", self.latest_snapshot.cpu_temp_c.unwrap_or(0.0)))
+                } else {
+                    metric.format(&self.latest_snapshot)
+                };
+                let _ = dev.update_telemetry_slot(slot as u8, label, &val);
+            }
+        }
+        ctx.request_repaint();
+    }
+
+    /// Renders the styled pill tab bar for switching between main GUI panels.
+    fn render_tab_bar(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            let tabs = [
+                (ActiveTab::Display,     "⚙  Display & Settings"),
+                (ActiveTab::Telemetry,   "📊  Hardware Telemetry"),
+                (ActiveTab::ImageUpload, "🖼  Wallpapers & Images"),
+            ];
+            for (tab, label) in tabs {
+                let is_active = self.active_tab == tab;
+                let btn_color = if is_active {
+                    Color32::from_rgb(220, 20, 60)
+                } else {
+                    Color32::from_rgb(55, 55, 70)
+                };
+                let txt_color = if is_active {
+                    Color32::WHITE
+                } else {
+                    Color32::from_rgb(180, 180, 200)
+                };
+                let btn = egui::Button::new(RichText::new(label).size(12.0).color(txt_color))
+                    .fill(btn_color)
+                    .corner_radius(5.0)
+                    .min_size(Vec2::new(0.0, 28.0));
+                if ui.add(btn).clicked() {
+                    self.active_tab = tab;
+                }
+                ui.add_space(2.0);
+            }
+        });
+    }
+}
+
+impl eframe::App for LcdGuiApp {
+    /// Main GUI frame update loop, handling events, layout rendering, and telemetry dispatch.
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.handle_upload_events();
+        self.handle_dropped_files(ctx);
+        self.tick_telemetry(ctx);
+
         self.render_header(ctx);
         self.render_preview_panel(ctx);
 
-        // Main Panel: Control Tabs
         egui::CentralPanel::default().show(ctx, |ui| {
             egui::ScrollArea::vertical()
                 .id_salt("central_scroll")
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
-                    // Styled pill tab bar
-                    ui.horizontal(|ui| {
-                        let tabs = [
-                            (ActiveTab::Display,     "⚙  Display & Settings"),
-                            (ActiveTab::Telemetry,   "📊  Hardware Telemetry"),
-                            (ActiveTab::ImageUpload, "🖼  Wallpapers & Images"),
-                        ];
-                        for (tab, label) in tabs {
-                            let is_active = self.active_tab == tab;
-                            let btn_color = if is_active {
-                                Color32::from_rgb(220, 20, 60)
-                            } else {
-                                Color32::from_rgb(55, 55, 70)
-                            };
-                            let txt_color = if is_active {
-                                Color32::WHITE
-                            } else {
-                                Color32::from_rgb(180, 180, 200)
-                            };
-                            let btn = egui::Button::new(RichText::new(label).size(12.0).color(txt_color))
-                                .fill(btn_color)
-                                .corner_radius(5.0)
-                                .min_size(Vec2::new(0.0, 28.0));
-                            if ui.add(btn).clicked() {
-                                self.active_tab = tab;
-                            }
-                            ui.add_space(2.0);
-                        }
-                    });
+                    self.render_tab_bar(ui);
                     ui.add_space(10.0);
 
                     match self.active_tab {
@@ -1814,7 +1861,6 @@ impl eframe::App for LcdGuiApp {
                 });
         });
 
-        // Render interactive crop & adjust modal when active
         self.render_crop_modal(ctx);
     }
 }
