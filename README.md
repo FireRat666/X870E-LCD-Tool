@@ -1,6 +1,6 @@
-# X870E Extreme LCD Tool
+# ROG X870E Motherboard LCD Tool
 
-A native, high-performance Linux driver, CLI daemon, and desktop GUI written in **Rust** to control, customize, flash images, and stream real-time hardware telemetry to the 5-inch onboard color LCD panel (`0b05:1c83`) on the ASUS ROG Crosshair X870E Extreme motherboard.
+A native, high-performance Linux driver, CLI daemon, and desktop GUI written in **Rust** to control, customize, flash images, and stream real-time hardware telemetry to the 5-inch onboard color LCD panels on ASUS ROG Crosshair X870E motherboards (supporting both the ROG Crosshair X870E Extreme `0b05:1c83` and ROG Crosshair X870E Glacial `0b05:1d93`).
 
 > [!WARNING]
 > **Experimental Software & Disclaimer**: This tool is an independently developed project and is not affiliated with or endorsed by ASUSTeK Computer Inc. Interacting directly with the onboard display microcontroller and flashing data to its SPI memory carries inherent risk. **You use this software entirely at your own risk.** If your panel stops responding, see [Emergency Recovery (Restoring the LCD)](#emergency-recovery-restoring-the-lcd) below.
@@ -309,6 +309,9 @@ ffmpeg -re -i my_video.mp4 -vf "scale=720:1280:force_original_aspect_ratio=incre
 Official ASUS stock firmware `0109` contains several firmware bugs that prevent live video streaming: an immediate shadow reload mid-frame that tears scanlines, a 3.68 MB synchronous CPU `memcpy` that saturates the external PSRAM bus, and dynamic bitmap heap exhaustion that crashes stock wallpapers.
 
 `x870e-lcd-patcher` applies the unified 3-part patch suite to official stock firmware `0109` to enable 100% clean, tear-free live video streaming while preserving all factory wallpapers and animations.
+
+> [!NOTE]
+> Firmware patching and USB firmware flashing are currently designed and verified specifically for the ROG Crosshair X870E Extreme (`0b05:1c83`, FW 0109). Custom streaming patches should not be flashed onto a Glacial panel.
 
 ```bash
 # 1. Inspect firmware (validates Sum32 checksum and patch status):

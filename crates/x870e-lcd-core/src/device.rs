@@ -6,8 +6,8 @@ use thiserror::Error;
 use tracing::{debug, info};
 
 use crate::protocol::{
-    self, upload, DisplayMode, HwLayout, ASUS_VENDOR_ID, BULK_CHUNK_SIZE, BULK_EP_OUT,
-    LCD_PRODUCT_ID, PACKET_LEN,
+    self, upload, DisplayMode, HwLayout, LcdModel, ASUS_VENDOR_ID, BULK_CHUNK_SIZE, BULK_EP_OUT,
+    LCD_PRODUCT_ID, PACKET_LEN, SUPPORTED_PRODUCT_IDS,
 };
 
 #[derive(Error, Debug)]
@@ -32,49 +32,45 @@ pub enum LcdError {
 pub struct LcdDevice {
     hid: hidapi::HidDevice,
     usb_handle: rusb::DeviceHandle<rusb::GlobalContext>,
+    model: LcdModel,
 }
 
 impl LcdDevice {
+    /// Returns the detected motherboard LCD model.
+    pub fn model(&self) -> LcdModel {
+        self.model
+    }
+
     /// Discovers and opens both the HID control channel and Bulk USB channel.
     pub fn open() -> Result<Self, LcdError> {
         let hid_api = hidapi::HidApi::new()?;
-        
-        let mut target_device_info = None;
-        for dev in hid_api.device_list() {
-            if dev.vendor_id() == ASUS_VENDOR_ID && dev.product_id() == LCD_PRODUCT_ID {
-                if dev.interface_number() == 1 || dev.interface_number() == -1 {
-                    target_device_info = Some(dev);
-                    break;
-                }
-            }
-        }
 
-        let hid_device = if let Some(info) = target_device_info {
-            info.open_device(&hid_api)?
-        } else {
-            hid_api.open(ASUS_VENDOR_ID, LCD_PRODUCT_ID)?
+        let matched_hid = hid_api.device_list().find_map(|dev| {
+            let is_target_interface = dev.interface_number() == 1 || dev.interface_number() == -1;
+            if dev.vendor_id() == ASUS_VENDOR_ID && is_target_interface {
+                LcdModel::from_product_id(dev.product_id()).map(|model| (dev, model))
+            } else {
+                None
+            }
+        });
+
+        let (hid_device, model) = match matched_hid {
+            Some((info, model)) => (info.open_device(&hid_api)?, model),
+            None => open_fallback_hid(&hid_api)?,
         };
 
-        let mut usb_handle = None;
-        for dev in rusb::devices()?.iter() {
-            if let Ok(desc) = dev.device_descriptor() {
-                if desc.vendor_id() == ASUS_VENDOR_ID && desc.product_id() == LCD_PRODUCT_ID {
-                    let handle = dev.open()?;
-                    let _ = handle.set_auto_detach_kernel_driver(true);
-                    handle.claim_interface(0)?;
-                    usb_handle = Some(handle);
-                    break;
-                }
-            }
-        }
+        let target_pid = model.product_id();
+        let usb_handle = open_bulk_handle(target_pid)?;
 
-        let usb_handle = usb_handle
-            .ok_or(LcdError::NotFound(ASUS_VENDOR_ID, LCD_PRODUCT_ID))?;
-
-        info!("Successfully opened ASUS ROG X870E Motherboard LCD Panel");
+        info!(
+            "Successfully opened ASUS {} Motherboard LCD Panel (0b05:{:04x})",
+            model.display_name(),
+            model.product_id()
+        );
         Ok(Self {
             hid: hid_device,
             usb_handle,
+            model,
         })
     }
 
@@ -311,4 +307,36 @@ impl LcdDevice {
 
         Ok(())
     }
+}
+
+/// Opens the USB bulk interface for the target product ID.
+fn open_bulk_handle(target_pid: u16) -> Result<rusb::DeviceHandle<rusb::GlobalContext>, LcdError> {
+    for dev in rusb::devices()?.iter() {
+        let desc = match dev.device_descriptor() {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+        if desc.vendor_id() == ASUS_VENDOR_ID && desc.product_id() == target_pid {
+            let handle = dev.open()?;
+            let _ = handle.set_auto_detach_kernel_driver(true);
+            handle.claim_interface(0)?;
+            return Ok(handle);
+        }
+    }
+    Err(LcdError::NotFound(ASUS_VENDOR_ID, target_pid))
+}
+
+/// Attempts to open any supported LCD device by product ID as a fallback when device enumeration misses it.
+fn open_fallback_hid(hid_api: &hidapi::HidApi) -> Result<(hidapi::HidDevice, LcdModel), LcdError> {
+    let mut last_err = None;
+    for &pid in SUPPORTED_PRODUCT_IDS {
+        match hid_api.open(ASUS_VENDOR_ID, pid) {
+            Ok(dev) => {
+                let model = LcdModel::from_product_id(pid).unwrap_or(LcdModel::Extreme);
+                return Ok((dev, model));
+            }
+            Err(e) => last_err = Some(e),
+        }
+    }
+    Err(last_err.map(LcdError::Hid).unwrap_or(LcdError::NotFound(ASUS_VENDOR_ID, LCD_PRODUCT_ID)))
 }

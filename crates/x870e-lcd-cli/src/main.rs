@@ -15,7 +15,7 @@ use x870e_lcd_core::{
 
 #[derive(Parser)]
 #[command(name = "x870e-lcd")]
-#[command(about = "Linux management CLI for ASUS ROG Crosshair X870E Extreme 5\" LCD Panel")]
+#[command(about = "Linux management CLI for ASUS ROG Crosshair X870E Motherboard 5\" LCD Panels")]
 #[command(version)]
 struct Cli {
     #[command(subcommand)]
@@ -135,6 +135,7 @@ enum CliHwLayout {
 }
 
 impl From<CliFitMode> for FitMode {
+    /// Converts a CLI fit mode argument into the core library [`FitMode`].
     fn from(mode: CliFitMode) -> Self {
         match mode {
             CliFitMode::Cover => FitMode::Cover,
@@ -145,6 +146,7 @@ impl From<CliFitMode> for FitMode {
 }
 
 impl From<CliHwLayout> for HwLayout {
+    /// Converts a CLI hardware layout argument into the core library [`HwLayout`].
     fn from(layout: CliHwLayout) -> Self {
         match layout {
             CliHwLayout::Single => HwLayout::Single,
@@ -155,6 +157,7 @@ impl From<CliHwLayout> for HwLayout {
     }
 }
 
+/// Entry point for the `x870e-lcd` command-line utility.
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env().add_directive(tracing::Level::INFO.into()))
@@ -164,9 +167,13 @@ fn main() -> Result<()> {
 
     match cli.command {
         Commands::Info => {
-            println!("Connecting to ASUS LCD Panel (0b05:1c83)...");
-            let _dev = LcdDevice::open().context("Failed to connect to LCD panel. Ensure udev rules are installed.")?;
-            println!("✓ Found and connected to ASUS Motherboard LCD Panel!");
+            println!("Connecting to ASUS Motherboard LCD Panel...");
+            let dev = LcdDevice::open().context("Failed to connect to LCD panel. Ensure udev rules are installed.")?;
+            println!(
+                "✓ Found and connected to ASUS {} (0b05:{:04x})!",
+                dev.model().display_name(),
+                dev.model().product_id()
+            );
             println!("  Resolution: 720 x 1280 (Portrait)");
             println!("  Interfaces: Interface 0 (Bulk EP2 OUT) & Interface 1 (HID Report 0xEC)");
         }
