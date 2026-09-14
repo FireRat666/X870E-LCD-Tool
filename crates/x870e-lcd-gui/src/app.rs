@@ -13,13 +13,14 @@ use x870e_lcd_core::{
     SlotCatalog, SlotEntry, TelemetrySnapshot,
 };
 
-#[derive(PartialEq, Eq, Clone, Copy)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
 enum ActiveTab {
     Display,
     Telemetry,
     ImageUpload,
 }
 
+#[derive(Debug)]
 enum UploadEvent {
     Progress(String),
     ImageFlashed { slot: u8, mode_name: String, msg: String },
@@ -776,10 +777,10 @@ impl LcdGuiApp {
                             ui.add_space(20.0);
                             ui.label(RichText::new("JPEG Quality:").strong());
                             let prev_q = state.jpeg_quality;
-                            if ui.add(Slider::new(&mut state.jpeg_quality, 50..=100).text("%").suffix("%")).changed() {
-                                if prev_q != state.jpeg_quality {
-                                    state.preview_dirty = true;
-                                }
+                            if ui.add(Slider::new(&mut state.jpeg_quality, 50..=100).text("%").suffix("%")).changed()
+                                && prev_q != state.jpeg_quality
+                            {
+                                state.preview_dirty = true;
                             }
                         });
 
@@ -879,7 +880,7 @@ impl LcdGuiApp {
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 ui.label(RichText::new("⚠ Notice:").color(Color32::from_rgb(255, 180, 0)).strong());
-                ui.label(format!("{err}"));
+                ui.label(err.to_string());
             });
             ui.add_space(4.0);
         });
@@ -1036,7 +1037,7 @@ impl LcdGuiApp {
             ui.label(RichText::new("Backlight Brightness").size(13.0));
             ui.add_space(4.0);
             let mut b = self.brightness;
-            let slider_width = (ui.available_width() - 16.0).min(500.0).max(200.0);
+            let slider_width = (ui.available_width() - 16.0).clamp(200.0, 500.0);
             if ui.add_sized(Vec2::new(slider_width, 20.0), Slider::new(&mut b, 0..=100).suffix("%").show_value(true)).changed() {
                 self.set_brightness(b);
             }
@@ -1864,3 +1865,132 @@ impl eframe::App for LcdGuiApp {
         self.render_crop_modal(ctx);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use x870e_lcd_core::protocol::{PANEL_HEIGHT, PANEL_WIDTH};
+
+    /// Verifies that active tab variants can be switched, compared, and formatted.
+    #[test]
+    fn test_active_tab_variants() {
+        let tab = ActiveTab::Display;
+        assert_eq!(tab, ActiveTab::Display);
+        assert_ne!(tab, ActiveTab::Telemetry);
+        assert_ne!(tab, ActiveTab::ImageUpload);
+
+        let copied = tab;
+        assert_eq!(copied, ActiveTab::Display);
+        assert_eq!(format!("{tab:?}"), "Display");
+    }
+
+    /// Verifies crop drag handle enum variant equality and debug representations.
+    #[test]
+    fn test_crop_drag_handle_variants() {
+        let handle = CropDragHandle::Inside;
+        assert_eq!(handle, CropDragHandle::Inside);
+        assert_ne!(handle, CropDragHandle::None);
+        assert_ne!(handle, CropDragHandle::TopLeft);
+        assert_ne!(handle, CropDragHandle::TopRight);
+        assert_ne!(handle, CropDragHandle::BottomLeft);
+        assert_ne!(handle, CropDragHandle::BottomRight);
+
+        let handles = [
+            CropDragHandle::None,
+            CropDragHandle::Inside,
+            CropDragHandle::TopLeft,
+            CropDragHandle::TopRight,
+            CropDragHandle::BottomLeft,
+            CropDragHandle::BottomRight,
+        ];
+        for h in &handles {
+            assert_eq!(*h, *h);
+        }
+    }
+
+    /// Verifies that section frame styling creates expected visual properties.
+    #[test]
+    fn test_section_frame_style() {
+        let frame = section_frame();
+        assert_eq!(frame.fill, Color32::from_rgb(22, 22, 32));
+        assert_eq!(frame.stroke.color, Color32::from_rgb(50, 50, 66));
+        assert_eq!(frame.stroke.width, 1.0);
+    }
+
+    /// Verifies that CropModalState produces an RGB image with target panel dimensions for each fit mode.
+    #[test]
+    fn test_crop_modal_state_generate_final_rgb() {
+        let ctx = egui::Context::default();
+        let dummy_img = DynamicImage::ImageRgb8(image::RgbImage::new(400, 300));
+        let texture = ctx.load_texture("test_tex", egui::ColorImage::example(), Default::default());
+
+        let mut state = CropModalState {
+            image_path: PathBuf::from("test.jpg"),
+            file_name: "test.jpg".to_string(),
+            original_image: dummy_img,
+            source_texture: texture,
+            preview_texture: None,
+            target_slot: 1,
+            fit_mode: FitMode::Cover,
+            norm_center: (0.5, 0.5),
+            crop_scale: 1.0,
+            jpeg_quality: 85,
+            active_drag: CropDragHandle::None,
+            drag_start_mouse: egui::Pos2::ZERO,
+            drag_start_center: (0.5, 0.5),
+            drag_start_scale: 1.0,
+            preview_dirty: true,
+            estimated_kb: 0,
+        };
+
+        // Test Cover mode
+        let img_cover = state.generate_final_rgb();
+        assert_eq!(img_cover.width(), PANEL_WIDTH);
+        assert_eq!(img_cover.height(), PANEL_HEIGHT);
+
+        // Test Fit mode
+        state.fit_mode = FitMode::Fit;
+        let img_fit = state.generate_final_rgb();
+        assert_eq!(img_fit.width(), PANEL_WIDTH);
+        assert_eq!(img_fit.height(), PANEL_HEIGHT);
+
+        // Test Stretch mode
+        state.fit_mode = FitMode::Stretch;
+        let img_stretch = state.generate_final_rgb();
+        assert_eq!(img_stretch.width(), PANEL_WIDTH);
+        assert_eq!(img_stretch.height(), PANEL_HEIGHT);
+    }
+
+    /// Verifies preview texture update and estimated size calculation in CropModalState.
+    #[test]
+    fn test_crop_modal_state_update_preview() {
+        let ctx = egui::Context::default();
+        let dummy_img = DynamicImage::ImageRgb8(image::RgbImage::new(100, 100));
+        let texture = ctx.load_texture("test_tex2", egui::ColorImage::example(), Default::default());
+
+        let mut state = CropModalState {
+            image_path: PathBuf::from("test.jpg"),
+            file_name: "test.jpg".to_string(),
+            original_image: dummy_img,
+            source_texture: texture,
+            preview_texture: None,
+            target_slot: 2,
+            fit_mode: FitMode::Cover,
+            norm_center: (0.5, 0.5),
+            crop_scale: 1.0,
+            jpeg_quality: 80,
+            active_drag: CropDragHandle::None,
+            drag_start_mouse: egui::Pos2::ZERO,
+            drag_start_center: (0.5, 0.5),
+            drag_start_scale: 1.0,
+            preview_dirty: true,
+            estimated_kb: 0,
+        };
+
+        state.update_preview(&ctx);
+        assert!(state.preview_texture.is_some());
+        assert!(!state.preview_dirty);
+        assert!(state.estimated_kb > 0);
+    }
+}
+
